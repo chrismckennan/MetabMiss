@@ -2,8 +2,7 @@
 % Please edit documentation in R/AnalyzeMetaboliteData.R
 \name{EstimateMissing}
 \alias{EstimateMissing}
-\title{Estimate the metabolite-dependent missingness mechanisms
-Estimate the metabolite-dependent missingness mechanisms with a hierarchical generalized method of moments (GMM). This function only has to be run once per metabolite dataset and the output should be stored with the metabolite data.}
+\title{Estimate the metabolite-dependent missingness mechanisms}
 \usage{
 EstimateMissing(Y, K = 10, max.missing.consider = 0.5, Cov = NULL,
   max.miss.C = 0.05, max.iter.C = 400, n.repeat.Sigma.C = 1,
@@ -38,6 +37,5 @@ EstimateMissing(Y, K = 10, max.missing.consider = 0.5, Cov = NULL,
 A list \item{Post.Theta}{\code{p} x 2 matrix containing the posterior expectations of the scale and location parameters (a,y0) for each metabolite. Returns \code{NA} for metabolites without a missingness mechansim.} \item{Post.Var}{A list of \code{p} 2x2 matrices containing the posterior variances for (a,y0) for each metabolite.} \item{Post.W}{A \code{p}x\code{n} containing the posterior expectations of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.VarW}{A \code{p}x\code{n} containing the posterior variances of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.Pi}{A \code{p}x\code{n} containing the posterior expectations of P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Pi.MAR}{A \code{p}x\code{n} containing estimate of P(Metab is observed | Latent covariates). This helps stabilize the inverse probability weights in downstream estimation.} \item{Theta.Miss}{\code{p} x 2 matrix with the estimates of the unshrunk GMM scale and location parameters a, y0 for each metabolite's missingness mechanism. If a missingness mechansism was not estimated, returns \code{NA}.} \item{Pvalue.value}{The J-test P-value that tests the null hypothesis H_0: Missingness mechanism is correct} \item{Ind.Confident}{A logical \code{p}-vector containing the indices of metabolites whose missingness mechanisms we are confident in.} \item{Emp.Bayes.loga}{Empirical Bayes estimate of E(log(a))} \item{Emp.Bayes.y0}{Empirical Bayes estimate of E(y0)}
 }
 \description{
-Estimate the metabolite-dependent missingness mechanisms
 Estimate the metabolite-dependent missingness mechanisms with a hierarchical generalized method of moments (GMM). This function only has to be run once per metabolite dataset and the output should be stored with the metabolite data.
 }

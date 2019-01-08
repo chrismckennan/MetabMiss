@@ -2,8 +2,7 @@
 % Please edit documentation in R/ConfounderCorrection_WithMissing.R
 \name{CC.Missing}
 \alias{CC.Missing}
-\title{Estimate latent covariates and coefficients of interest
-Estimate latent covariates and estimate/do inference on the coefficients of interest in a multivariate linear model with stabilized inverse probability weighting (sIPW) using estimated missingness mechansim.}
+\title{Estimate latent covariates and coefficients of interest}
 \usage{
 CC.Missing(Y, X, Z = NULL, K, Miss.Mech, ind.samples = NULL,
   max.miss.perp = 0.5, max.miss.image = 0.5, BH.min = NULL,
@@ -32,6 +31,5 @@ CC.Missing(Y, X, Z = NULL, K, Miss.Mech, ind.samples = NULL,
 A list \item{C.corr}{The estimate of the \code{n} x \code{K} matrix of latent covariates.} \item{Beta.corr}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest.} \item{p.t.corr}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest.} \item{L}{The estimate of the \code{p} x \code{K} matrix of coefficients for the latent covariates.} \item{Beta.naive}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest that ignores C. This should ONLY be used for comparison.} \item{p.t.naive}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest that ignore C. This should ONLY be used for comparison.}
 }
 \description{
-Estimate latent covariates and coefficients of interest
 Estimate latent covariates and estimate/do inference on the coefficients of interest in a multivariate linear model with stabilized inverse probability weighting (sIPW) using estimated missingness mechansim.
 }
