@@ -15,7 +15,7 @@ EstimateMissing(Y, K = 10, max.missing.consider = 0.5, Cov = NULL,
 \arguments{
 \item{Y}{a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.}
 
-\item{K}{a number >= 1. This gives the number of latent covariates to use to estimate the missingness mechanism. The default is 10}
+\item{K}{a number >= 2. This gives the number of latent covariates to use to estimate the missingness mechanism. The default is 10}
 
 \item{max.missing.consider}{The maximum fraction of missing data a metabolite is allowed to have. Missingness mechanisms will NOT be estimated for metabolites with more missing data than this. Default is 0.5}
 

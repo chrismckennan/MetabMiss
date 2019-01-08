@@ -2,10 +2,11 @@ library(parallel)
 ####Estimate missingness mechanism from metabolite data matrix####
 
 #' Estimate the metabolite-dependent missingness mechanisms
+#'
 #' Estimate the metabolite-dependent missingness mechanisms with a hierarchical generalized method of moments (GMM). This function only has to be run once per metabolite dataset and the output should be stored with the metabolite data.
 #' 
 #' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
-#' @param K a number >= 1. This gives the number of latent covariates to use to estimate the missingness mechanism. The default is 10
+#' @param K a number >= 2. This gives the number of latent covariates to use to estimate the missingness mechanism. The default is 10
 #' @param max.missing.consider The maximum fraction of missing data a metabolite is allowed to have. Missingness mechanisms will NOT be estimated for metabolites with more missing data than this. Default is 0.5
 #' @param max.miss.C Maximum fraction of missing data a metabolite can have to ignore the missingness mechanism in downstream estimation and inference. The default is 0.05.
 #' @param max.iter.C Maximum number of iterations to estimate the latent covariates C. Default is 400 and should not be changed.

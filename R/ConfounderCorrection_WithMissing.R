@@ -2,6 +2,7 @@
 #Input is data matrix, X, Z, K and missingness mechanism estimated with EstimateMissing
 
 #' Estimate latent covariates and coefficients of interest
+#'
 #' Estimate latent covariates and estimate/do inference on the coefficients of interest in a multivariate linear model with stabilized inverse probability weighting (sIPW) using estimated missingness mechansim.
 #'
 #' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
