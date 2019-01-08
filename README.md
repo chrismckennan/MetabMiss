@@ -1,2 +1,2 @@
 # MetabMiss
-Estimate and account for missing data and latent confounders in metabolomic and proteomic data
+Estimate and account for non-ignorable missingness mechanisms and latent confounders in metabolomic and proteomic data
