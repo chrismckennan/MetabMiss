@@ -1,0 +1,364 @@
+library(parallel)
+####Estimate missingness mechanism from metabolite data matrix####
+
+#' Estimate the metabolite-dependent missingness mechanisms
+#' Estimate the metabolite-dependent missingness mechanisms with a hierarchical generalized method of moments (GMM). This function only has to be run once per metabolite dataset and the output should be stored with the metabolite data.
+#' 
+#' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
+#' @param K a number >= 1. This gives the number of latent covariates to use to estimate the missingness mechanism. The default is 10
+#' @param max.missing.consider The maximum fraction of missing data a metabolite is allowed to have. Missingness mechanisms will NOT be estimated for metabolites with more missing data than this. Default is 0.5
+#' @param max.miss.C Maximum fraction of missing data a metabolite can have to ignore the missingness mechanism in downstream estimation and inference. The default is 0.05.
+#' @param max.iter.C Maximum number of iterations to estimate the latent covariates C. Default is 400 and should not be changed.
+#' @param t.df The missingness mechanism is the CDF of a scaled and cetered T-distribution with t.df degrees of freedom. The default (and recommended value) is 4
+#' @param n.boot.J The number of bootstrap samples to compute the J-statistics. The defualt is 150.
+#' @param Cov An optional n x d matrix of covariates. It is recommended the user not specify anything other than the intercept. The default is the intercept.
+#' @param n.K.GMM Number of additional terms (besides the intercept) to be considered in GMM when estimating the missingness mechanism. The default (and recommendend value) is 2. If changed, this must be >= 2
+#' @param Model.Pvalue A logical value. If \code{T}, a missingness model P-value is computed. The default (and recommended value) is \code{T}.
+#'
+#' @return A list \item{Post.Theta}{\code{p} x 2 matrix containing the posterior expectations of the scale and location parameters (a,y0) for each metabolite. Returns \code{NA} for metabolites without a missingness mechansim.} \item{Post.Var}{A list of \code{p} 2x2 matrices containing the posterior variances for (a,y0) for each metabolite.} \item{Post.W}{A \code{p}x\code{n} containing the posterior expectations of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.VarW}{A \code{p}x\code{n} containing the posterior variances of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.Pi}{A \code{p}x\code{n} containing the posterior expectations of P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Pi.MAR}{A \code{p}x\code{n} containing estimate of P(Metab is observed | Latent covariates). This helps stabilize the inverse probability weights in downstream estimation.} \item{Theta.Miss}{\code{p} x 2 matrix with the estimates of the unshrunk GMM scale and location parameters a, y0 for each metabolite's missingness mechanism. If a missingness mechansism was not estimated, returns \code{NA}.} \item{Pvalue.value}{The J-test P-value that tests the null hypothesis H_0: Missingness mechanism is correct} \item{Ind.Confident}{A logical \code{p}-vector containing the indices of metabolites whose missingness mechanisms we are confident in.} \item{Emp.Bayes.loga}{Empirical Bayes estimate of E(log(a))} \item{Emp.Bayes.y0}{Empirical Bayes estimate of E(y0)}
+#'
+#' @export
+EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.miss.C = 0.05, max.iter.C = 400, n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a=0.1, max.a=7, min.y0=10, max.y0=30, t.df=4, p.min.1=0, p.min.2=0, n.boot.J=150, Model.Pvalue=T, BH.analyze.min=0.2, min.quant.5=5, shrink.Est=T, prop.y0.sd = 0.2, prop.a.sd = 0.2, n.iter.MCMC = 2e4, n.burn.MCMC = 1e3, min.prob.MCMC = 1/n) {
+  p <- nrow(Y)
+  n <- ncol(Y)
+  Prob.Missing <- apply(X = Y, MARGIN = 1, function(x) {mean(is.na(x))})
+  if (is.null(Cov)) {Cov <- cbind(rep(1,n))}
+  out <- list()
+  out$max.miss.C <- max.miss.C
+  
+  ###Estimate C###
+  cat(paste("Estimating", K, "latent factors...", collapse = ""))
+  out.C <- EstC.0(Y = Y, K = K, Cov = Cov, max.miss = max.miss.C, max.iter = max.iter.C, n.repeat.Sigma = n.repeat.Sigma.C)
+  C <- out.C$C
+  W <- out.C$W
+  out$C <- out.C$C
+  cat("done\n")  
+    
+  
+  ###Preliminary estimate for missingness###
+  n_cores <- max(detectCores() - 1, 1)
+  cat(paste("Preliminary estimate of missingness mechanism using", n_cores, "cores..."))
+  Exp.FI <- solve(t(out.C$W)%*%out.C$W)
+  ind.missing <- which(Prob.Missing > max.miss.C & Prob.Missing <= max.missing.consider)
+  Tstat.start <- matrix(NA, p, K+1)
+  
+  cl <- makeCluster(n_cores)
+  clusterExport(cl = cl, c("min.a", "max.a", "min.y0", "max.y0", "C", "W", "Exp.FI", "n.K.GMM", "t.df", "p.min.1", "p.min.2"), envir=environment())
+  clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")})
+  Tstat.start[ind.missing,] <- t( parApply(cl = cl, X = Y[ind.missing,], MARGIN = 1, function(y.g) {
+    ind.g <- !is.na(y.g)
+    miss.g <- Opt.GMM.t.grid(A.grid = seq(min.a,max.a,by=0.05), Pos.Grid = seq(min.y0,max.y0,by=0.2), y = y.g, C = C, K.ind = 1:n.K.GMM, n.iter = 2, t.df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)
+    prob.obs.g <- pt.gen(x = miss.g$a*y.g[ind.g]-miss.g$y0, df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)
+    prob.obs.g[prob.obs.g < 0.05] <- 0.05
+    
+    gamma.g <- solve(t(W[ind.g,]/prob.obs.g)%*%W[ind.g,], t(W[ind.g,]/prob.obs.g)%*%y.g[ind.g])
+    resids.g <- W[ind.g,] * as.vector((y.g[ind.g] - W[ind.g,]%*%gamma.g))
+    Var.g <- Exp.FI %*% (t(resids.g/prob.obs.g^2)%*%resids.g) %*% Exp.FI
+    return(gamma.g / sqrt(diag(Var.g)))
+  }) )
+  stopCluster(cl)
+
+  cat("done\n")
+  d <- ncol(out.C$W) - K
+  Qvalues <- matrix(NA, nrow=p, ncol=K)
+  out$InitialPvalues <- matrix(NA, nrow=p, ncol=K)
+  max.H1 <- 0.5  #Maximum p-value to be considered H1. To be used if q-value fails
+  for (k in 1:K) {
+    ind.k <- !is.na(Tstat.start[,d+k])
+    p.k <- 2*pnorm(-abs(Tstat.start[ind.k,d+k])); out$InitialPvalues[ind.k,k] <- p.k
+    try.k <- try(expr = {Q.k <- qvalue::qvalue(p.k); Qvalues[ind.k,k] <- Q.k$qvalues}, silent = TRUE)
+    if (class(try.k) == "try-error") {
+      n.0.k <- sum(p.k > max.H1)/(1-max.H1)
+      Qvalues[ind.k,k] <- p.k*n.0.k/unlist(lapply(p.k, function(p.kg){sum(p.k<=p.kg)}))
+    }
+  }
+  
+  
+  ###Estimate missingness mechanism parameters with GMM###
+  n_cores <- max(detectCores() - 1, 1)
+  cat(paste("Estimating missingness mechanism using", n_cores, "cores..."))
+  out$Theta.Miss <- matrix(NA, nrow=p, ncol=2)
+  out$Theta.MAR <- matrix(NA, nrow=p, ncol=n.K.GMM+1)
+  out$Pi.MAR <- matrix(NA, nrow=p, ncol=n)
+  out$K.mat <- matrix(NA, nrow=p, ncol=n.K.GMM)
+  out$Var.Theta <- vector(mode = "list", length = p)
+  out$Q.use <- matrix(NA, nrow=p, ncol=n.K.GMM)
+  out$Value.opt <- rep(NA, p)
+  out$Pvalue.value <- rep(NA, p)
+  out$Pvalue.value.gamma <- rep(NA, p)
+  
+  cl <- makeCluster(n_cores)
+  clusterExport(cl = cl, c("Model.Pvalue", "min.a", "max.a", "min.y0", "max.y0", "C", "n.K.GMM", "t.df", "p.min.1", "p.min.2", "n.boot.J"), envir=environment())
+  clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")
+                                source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/BayesianGMM.R")})
+  out.tmp <- parLapply( cl = cl, X = lapply(ind.missing, function(g){return(list(y=Y[g,], t.stat=Tstat.start[g,-1], q=Qvalues[g,]))}), function(ll){
+    out.par <- list()
+    y.g <- ll$y
+    K.ind.g <- order(-abs(ll$t.stat))[1:n.K.GMM]
+    
+    #MAR fit#
+    tmp <- glm.fit(x = Get.U(C = C, K.ind = K.ind.g), y = as.numeric(!is.na(ll$y)), family = binomial())
+    out.par$theta.mar <- tmp$coefficients
+    out.par$Pi.MAR <- tmp$fitted.values
+    
+    out.par$K.ind <- K.ind.g
+    out.par$q <- ll$q[K.ind.g]
+    
+    out.2 <- Opt.GMM.t.grid(A.grid = seq(min.a,max.a,by=0.05), Pos.Grid = seq(min.y0,max.y0,by=0.2), y = y.g, C = C, K.ind = K.ind.g, n.iter = 2, t.df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)
+    out.par$value <- out.2$out.value*2/length(y.g)
+    out.par$theta <- c(out.2$a, out.2$y0/out.2$a)
+    out.par$value <- Val.Opt.t(a = out.par$theta[1], y0 = out.par$theta[2], y = y.g, C = C, K.ind = K.ind.g, t.df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)
+    
+    #Bootstrapped J test statistic#
+    if (Model.Pvalue && n.K.GMM >= 2 && !(out.par$theta[1] <= (min.a+0.1) || out.par$theta[1] >= (max.a-0.1) || out.par$theta[2] <= (min.y0+0.2) || out.par$theta[2] >= (max.y0-0.2))) {
+      tmp <- Boot.J(y = y.g, C = C, theta = out.par$theta, K.ind = K.ind.g, value.opt = out.par$value, t.df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2, n.boot = n.boot.J)
+      out.par$J.pvalue <- tmp$p.value
+      if (!is.null(tmp$p.value.boot)) {
+        out.par$J.pvalue.boot <- tmp$p.value.boot
+      } else {
+        out.par$J.pvalue.boot <- tmp$p.value
+      }
+    } else {
+      out.par$J.pvalue <- NA
+      out.par$J.pvalue.boot <- NA
+    }
+    
+    #Variance#
+    out.var.2 <- try(expr = {out.par$Var <- Var.GMM.t(theta = c(out.2$a, out.2$y0), y = y.g, C = C, K.ind = K.ind.g, W = out.2$W, t.df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)$Asy.Var}, silent = T)
+    if (class(out.var.2) == "try-error") {
+      out.par$Var <- NA
+    }
+    return(out.par)
+  } )
+  stopCluster(cl)
+  out$Theta.Miss[ind.missing,] <- t(sapply(X = out.tmp, function(x){x$theta}))
+  out$Theta.MAR[ind.missing,] <- t(sapply(X = out.tmp, function(x){x$theta.mar}))
+  out$Pi.MAR[ind.missing,] <- t(sapply(X = out.tmp, function(x){x$Pi.MAR}))
+  out$K.mat[ind.missing,] <- t(sapply(X = out.tmp, function(x){x$K.ind}))
+  out$Var.Theta[ind.missing] <- lapply(X = out.tmp, function(x){x$Var})
+  out$Q.use[ind.missing,] <- t(sapply(X = out.tmp, function(x){x$q}))
+  out$Value.opt[ind.missing] <- as.vector(sapply(X = out.tmp, function(x){x$value}))
+  out$Pvalue.value[ind.missing] <- unlist(lapply(X = out.tmp, function(x){x$J.pvalue.boot}))
+  out$Pvalue.value.gamma[ind.missing] <- unlist(lapply(X = out.tmp, function(x){x$J.pvalue}))
+  
+  cat("done\n")
+  if (n.K.GMM >= 2 && Model.Pvalue) {
+    #tmp.q <- try(expr = {qvalue.model <- qvalue(out$Pvalue.value)})
+    reject.BH <- BH.proc(p = out$Pvalue.value, alpha = BH.analyze.min)
+    ind.q <- reject.BH == FALSE & !is.na(reject.BH)
+    out$Ind.Confident <- ind.q
+    out$BH.min <- BH.analyze.min
+    #ind.q <- !is.na(out$Pvalue.value) & qvalue.model$lfdr >= lfdr.analyze.min
+  } else {
+    ind.q <- !is.na(out$Theta.Miss[,1]) & !(out$Theta.Miss[,1] <= (min.a+0.1) | out$Theta.Miss[,1] >= (max.a-0.1) | out$Theta.Miss[,2] <= (min.y0+0.2) | out$Theta.Miss[,2] >= (max.y0-0.2))
+    out$Ind.Confident <- ind.q
+  }
+  
+  
+  ###Empirical Bayes to estimate prior for a and y0 and then MCMC to get posterior expectations and variances###
+  if (shrink.Est) {
+    #Empirical Bayes#
+    Emp.Bayes.both <- Emp.Bayes.MuSigma.Both(Mu = cbind(log(out$Theta.Miss[ind.q,1]),out$Theta.Miss[ind.q,2]),
+                                             Var = lapply( X = which(ind.q==T), function(g){tmp <- out$Var.Theta[[g]]; if (is.null(tmp)){(return(NA))}; diag(c(1/out$Theta.Miss[g,1],1))%*%tmp%*%diag(c(1/out$Theta.Miss[g,1],1))} ))
+    out$Emp.Bayes.loga <- Emp.Bayes.MuSigma(Mu.g = log(out$Theta.Miss[ind.q,1]), Var.g = unlist(lapply(X=out$Var.Theta[ind.q],function(x){x[1,1]}))/out$Theta.Miss[ind.q,1]^2, middle = "mean", shift.var = 0, refine.mu = T)
+    out$Emp.Bayes.y0 <- Emp.Bayes.MuSigma(Mu.g = out$Theta.Miss[ind.q,2], Var.g = unlist(lapply(X=out$Var.Theta[ind.q],function(x){x[2,2]})), middle = "mean", shift.var = 0, refine.mu = T)
+    out$V.prior <- Emp.Bayes.both$V
+    out$mu.prior <- Emp.Bayes.both$mu
+    
+    #MCMC with covariance term = 0#
+    out$Post.W <- matrix(1, nrow=p, ncol=n)
+    out$Post.VarW <- matrix(1, nrow=p, ncol=n)
+    out$Post.Theta <- matrix(NA, nrow=p, ncol=2)
+    out$Post.Var <- vector(mode = "list", length = p)
+    out$Post.Pi <- matrix(1, nrow=p, ncol=n)
+    
+    ind.q.MCMC <- !is.na(out$Theta.Miss[,1])
+    
+    n_cores <- max(detectCores() - 1, 1)
+    cat(paste("MCMC using", n_cores, "cores..."))
+    cl <- makeCluster(n_cores)
+    clusterExport(cl = cl, c("C", "t.df", "p.min.1", "p.min.2", "Emp.Bayes.both", "prop.y0.sd", "prop.a.sd", "n.iter.MCMC", "n.burn.MCMC", "min.prob.MCMC"), envir=environment())
+    clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")
+      source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/BayesianGMM.R")})
+    out.MCMC <- parLapply(cl = cl, X = lapply(which(ind.q.MCMC==T),function(g){return(list(K.ind=out$K.mat[g,], y=Y[g,], y0=out$Theta.Miss[g,2], a=out$Theta.Miss[g,1]))}), function(ll) {
+      out.Bayes.g <- Bayes.GMM(y = ll$y, C = C, K.ind = ll$K.ind, p.min.1 = p.min.1, p.min.2 = p.min.2, t.df = t.df, y0.mean = Emp.Bayes.both$mu[2], log.a.mean = Emp.Bayes.both$mu[1], V = diag(diag(Emp.Bayes.both$V)), y0.start = ll$y0, a.start = ll$a, prop.y0.sd = prop.y0.sd, prop.a.sd = prop.a.sd, n.iter = n.iter.MCMC, n.burn = n.burn.MCMC, save.every = 0, include.norm = T, min.prob = min.prob.MCMC)
+      return(list( theta=out.Bayes.g$Post.Exp, Var=out.Bayes.g$Post.Var, W=out.Bayes.g$Post.Exp.W, Pi=out.Bayes.g$Post.Exp.Pi, Var.W=out.Bayes.g$Post.Var.W ))
+    })
+    stopCluster(cl)
+    cat("done\n")
+    out$Post.Theta[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$theta}))
+    out$Post.Var[which(ind.q.MCMC==T)] <- lapply(X = out.MCMC, function(x){x$Var})
+    out$Post.W[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$W}))
+    out$Post.VarW[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$Var.W}))
+    out$Post.Pi[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$Pi}))
+  }
+  out$ind.analyze <- sort(c(which(Prob.Missing <= max.miss.C), which(ind.q.MCMC == T)))
+  return(out)
+}
+
+
+######Estimate coefficients of interest given missingness mechanism######
+#This does not include confounder estimation
+
+EstimateParam <- function(Y, X=NULL, Z=NULL, Miss.Obj, method=c("OLS", "Huber"), include.naive.est=F, Prob.Obs=NULL) {
+  out <- list()
+  method <- match.arg(method, c("OLS", "Huber"))
+  Cov <- cbind(X,Z)
+  
+  if (is.null(X)) {
+    d <- 0
+  } else {
+    X <- cbind(X)
+    d <- ncol(X)
+  }
+  
+  if (is.null(Z)) {
+    r <- 0
+  } else {
+    Z <- cbind(Z)
+    r <- ncol(Z)
+  }
+  
+  n <- ncol(Y)
+  p <- nrow(Y)
+  ind.metab.missing <- which(!is.na(Miss.Obj$Theta.Miss[,1]) == T)
+  ind.metab.obs <- Miss.Obj$ind.analyze[!(Miss.Obj$ind.analyze %in% ind.metab.missing)]
+  
+  #Get effect estimates#
+  out$Beta <- matrix(NA, nrow=p, ncol=d+r)
+  out$Beta.sw <- matrix(NA, nrow=p, ncol=d+r)   #Stabalized weights
+  out$Beta.NoShrink <- matrix(NA, nrow=p, ncol=d+r)   #No shrinkage
+  out$Var <- matrix(NA, nrow=p, ncol=d+r) 
+  out$Var.sw <- matrix(NA, nrow=p, ncol=d+r); out$Var.sw.vc <- matrix(NA, nrow=p, ncol=d+r)
+  out$Var.NoShrink <- matrix(NA, nrow=p, ncol=d+r) 
+  if (include.naive.est) {
+    out$Beta.naive <- matrix(NA, nrow=p, ncol=d+r)
+    out$Var.naive <- matrix(NA, nrow=p, ncol=d+r)
+    tmp <- t(apply(X = Y[Miss.Obj$ind.analyze,], MARGIN = 1, function(y) {
+      ind.obs <- !is.na(y)
+      beta <- solve(t(Cov[ind.obs,])%*%Cov[ind.obs,],t(Cov[ind.obs,])%*%y[ind.obs])
+      sigma2 <- sum((y[ind.obs]-as.vector(Cov[ind.obs,]%*%beta))^2)/(sum(ind.obs)-d-r)
+      return(c(beta,sigma2*diag(solve(t(Cov[ind.obs,])%*%Cov[ind.obs,]))))
+    }))
+    out$Beta.naive[Miss.Obj$ind.analyze,] <- tmp[,1:(d+r)]
+    out$Var.naive[Miss.Obj$ind.analyze,] <- tmp[,(d+r+1):(2*d+2*r)]
+  }
+  
+  if (method == "OLS") {
+    #Fully observed metabolites#
+    tmp <- t(apply(X = Y[ind.metab.obs,], MARGIN = 1, function(y) {
+      ind.obs <- !is.na(y)
+      beta <- solve(t(Cov[ind.obs,])%*%Cov[ind.obs,],t(Cov[ind.obs,])%*%y[ind.obs])
+      sigma2 <- sum((y[ind.obs]-as.vector(Cov[ind.obs,]%*%beta))^2)/(n-d-r)
+      return(c(beta,sigma2*diag(solve(t(Cov[ind.obs,])%*%Cov[ind.obs,]))))
+    }))
+    out$Beta[ind.metab.obs,] <- tmp[,1:(d+r)]
+    out$Beta.sw[ind.metab.obs,] <- tmp[,1:(d+r)]
+    out$Beta.NoShrink[ind.metab.obs,] <- tmp[,1:(d+r)]
+    out$Var[ind.metab.obs,] <- tmp[,(d+r+1):(2*d+2*r)]
+    out$Var.sw[ind.metab.obs,] <- tmp[,(d+r+1):(2*d+2*r)]; out$Var.sw.vc[ind.metab.obs,] <- tmp[,(d+r+1):(2*d+2*r)]
+    out$Var.NoShrink[ind.metab.obs,] <- tmp[,(d+r+1):(2*d+2*r)]
+    
+    #Partially observed metabolites#
+    tmp <- t(sapply(X = ind.metab.missing, function(g) {
+      y <- Y[g,]
+      ind.obs <- !is.na(y)
+      weights <- Miss.Obj$Post.W[g,ind.obs]; var.weights <- Miss.Obj$Post.VarW[g,ind.obs]
+      beta <- solve( t(Cov[ind.obs,]*weights)%*%Cov[ind.obs,], t(Cov[ind.obs,]*weights)%*%y[ind.obs] )
+      score <- Cov[ind.obs,]*(y[ind.obs]-as.vector(Cov[ind.obs,]%*%beta))
+      Sample.FI <- solve(t(Cov[ind.obs,]*weights)%*%Cov[ind.obs,])
+      return( c(beta,diag(Sample.FI%*%( t(score*(weights^2+var.weights))%*%score )%*%Sample.FI)) )
+    }))
+    out$Beta[ind.metab.missing,] <- tmp[,1:(d+r)]
+    out$Var[ind.metab.missing,] <- tmp[,(d+r+1):(2*d+2*r)]
+    
+    tmp <- t(sapply(X = ind.metab.missing, function(g) {
+      y <- Y[g,]
+      ind.obs <- !is.na(y)
+      weights <- Miss.Obj$Post.W[g,ind.obs]*Miss.Obj$Pi.MAR[g,ind.obs]; var.weights <- Miss.Obj$Post.VarW[g,ind.obs]*Miss.Obj$Pi.MAR[g,ind.obs]^2
+      beta <- solve( t(Cov[ind.obs,]*weights)%*%Cov[ind.obs,], t(Cov[ind.obs,]*weights)%*%y[ind.obs] )
+      score <- Cov[ind.obs,]*(y[ind.obs]-as.vector(Cov[ind.obs,]%*%beta))  #n x (d+r)
+      Sample.FI <- solve(t(Cov[ind.obs,]*weights)%*%Cov[ind.obs,])
+      
+      cov.tmp <- cbind(Cov[ind.obs,])
+      #score.vc <- t(sapply(X = 1:nrow(score), function(i){ as.vector(solve( diag(1,ncol(cov.tmp),ncol(cov.tmp)) - weights[i]*cbind(cov.tmp[i,])%*%rbind(cov.tmp[i,])%*%Sample.FI, score[i,] )) }))
+      Weights.vc <- 1/(1 - weights*apply(cov.tmp, 1, function(x) { sum(x*as.vector(Sample.FI%*%x)) }))
+      
+      return( c(beta,diag(Sample.FI%*%( t(score*(weights^2+var.weights))%*%score )%*%Sample.FI),diag(Sample.FI%*%( t(score*Weights.vc^2*(weights^2+var.weights))%*%score )%*%Sample.FI)) )
+    }))
+    out$Beta.sw[ind.metab.missing,] <- tmp[,1:(d+r)]
+    out$Var.sw[ind.metab.missing,] <- tmp[,(d+r+1):(2*d+2*r)]; out$Var.sw.vc[ind.metab.missing,] <- tmp[,(2*d+2*r+1):(3*d+3*r)]
+    
+    tmp <- t(sapply(X = ind.metab.missing, function(g) {
+      y <- Y[g,]
+      ind.obs <- !is.na(y)
+      weights <- 1/pt.gen(x = Miss.Obj$Theta.Miss[g,1]*(y[ind.obs]-Miss.Obj$Theta.Miss[g,2]), df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)
+      beta <- solve( t(Cov[ind.obs,]*weights)%*%Cov[ind.obs,], t(Cov[ind.obs,]*weights)%*%y[ind.obs] )
+      score <- Cov[ind.obs,]*(y[ind.obs]-as.vector(Cov[ind.obs,]%*%beta))
+      Sample.FI <- solve(t(Cov[ind.obs,]*weights)%*%Cov[ind.obs,])
+      return( c(beta,diag(Sample.FI%*%( t(score*weights^2)%*%score )%*%Sample.FI)) )
+    }))
+    out$Beta.NoShrink[ind.metab.missing,] <- tmp[,1:(d+r)]
+    out$Var.NoShrink[ind.metab.missing,] <- tmp[,(d+r+1):(2*d+2*r)]
+    
+    if (!is.null(Prob.Obs)) {
+      out$Beta.obs <- matrix(NA, nrow=p, ncol=d+r)
+      out$Var.obs <- matrix(NA, nrow=p, ncol=d+r)
+      tmp <- t(sapply(X = ind.metab.missing, function(g) {
+        y <- Y[g,]
+        ind.obs <- !is.na(y)
+        weights <- 1/Prob.Obs[g,ind.obs]
+        beta <- solve( t(Cov[ind.obs,]*weights)%*%Cov[ind.obs,], t(Cov[ind.obs,]*weights)%*%y[ind.obs] )
+        score <- Cov[ind.obs,]*(y[ind.obs]-as.vector(Cov[ind.obs,]%*%beta))
+        Sample.FI <- solve(t(Cov[ind.obs,]*weights)%*%Cov[ind.obs,])
+        return( c(beta,diag(Sample.FI%*%( t(score*weights^2)%*%score )%*%Sample.FI)) )
+      }))
+      out$Beta.obs[ind.metab.missing,] <- tmp[,1:(d+r)]
+      out$Var.obs[ind.metab.missing,] <- tmp[,(d+r+1):(2*d+2*r)]
+    }
+  }
+  
+  return(out)
+}
+
+
+####OLS with weights####
+Standard.OLS <- function(y, Cov, weights=NULL, Cov.total=NULL) {
+  Cov <- cbind(Cov)
+  n <- length(y)
+  
+  if (is.null(weights)) {
+    b <- solve(t(Cov)%*%Cov,t(Cov)%*%y)
+    sigma2 <- 1/(n-ncol(Cov))*sum((y-as.vector(Cov%*%b))^2)
+    return(list(b=b, z=b/sqrt(sigma2)/sqrt(diag(solve(t(Cov)%*%Cov)))))
+  }
+  b <- as.vector(solve(t(Cov*weights)%*%Cov,t(Cov*weights)%*%y))
+  hess <- solve(t(Cov*weights)%*%Cov)
+  Inflate <- 1/(1 - weights * apply(X = Cov, MARGIN = 1, function(x){sum(x*as.vector(hess%*%x))}))
+  Mid <- t(Cov*weights^2*Inflate^2*(y - as.vector(Cov%*%b))^2)%*%Cov
+  if (is.null(Cov.total)) {
+    return(list(b=b, z=b/sqrt(diag(hess%*%Mid%*%hess))))
+  }
+  hess <- solve(t(Cov.total)%*%Cov.total)
+  return(list(b=b, z=b/sqrt(diag(hess%*%Mid%*%hess))))
+} 
+
+
+#####BH-FDR#####
+
+BH.proc <- function(p, alpha=0.25) {
+  n <- length(p)
+  Reject <- rep(NA, n)   #Reject null?
+  p.obs <- p[!is.na(p)]
+  n.obs <- length(p.obs)
+  
+  Reject.obs <- rep(FALSE, n.obs)
+  order.obs <- order(p.obs)
+  ind.less <- which(p.obs[order.obs] - (1:n.obs)/n.obs*alpha < 0)
+  if (length(ind.less) > 0) {
+    Reject.obs[p.obs <= max(p.obs[order.obs][ind.less])] <- TRUE
+  }
+  Reject[!is.na(p)] <- Reject.obs
+  return(Reject)
+}
+
