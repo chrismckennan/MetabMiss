@@ -178,6 +178,7 @@ CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.pe
   out.tmp <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$C.corr,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
   out$p.t.corr <- out.tmp$p.t
   out$Beta.corr <- out.tmp$Beta
+  out$Var.beta.corr <- out.tmp$Var.beta
   
   ######Ignore C######
   out.tmp.naive <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
@@ -185,11 +186,16 @@ CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.pe
   out$Beta.naive <- out.tmp.naive$Beta.naive
   
   ######Ignore Missingness######
-  out$p.t.ignore.miss <- rep(NA, nrow(Y))
-  out$Beta.ignore.miss <- rep(NA, nrow(Y))
-  tmp.ignore <- Ignore.Missing(Y = Y[ind.miss.all | Prob.Missing <= max.miss.C,], Cov = cbind(out$X,out$C.corr,out$Z))
-  out$p.t.ignore.miss[ind.miss.all | Prob.Missing <= max.miss.C] <- tmp.ignore$p
-  out$Beta.ignore.miss[ind.miss.all | Prob.Missing <= max.miss.C] <- tmp.ignore$beta
+  if (ncol(X) == 1) {
+    out$p.t.ignore.miss <- rep(NA, nrow(Y))
+    out$Beta.ignore.miss <- rep(NA, nrow(Y))
+    out$Var.beta.ignore.miss <- rep(NA, nrow(Y))
+    tmp.ignore <- Ignore.Missing(Y = Y[ind.miss.all | Prob.Missing <= max.miss.C,], Cov = cbind(out$X,out$C.corr,out$Z))
+    out$p.t.ignore.miss[ind.miss.all | Prob.Missing <= max.miss.C] <- tmp.ignore$p
+    out$Beta.ignore.miss[ind.miss.all | Prob.Missing <= max.miss.C] <- tmp.ignore$beta
+    out$Var.beta.ignore.miss[ind.miss.all | Prob.Missing <= max.miss.C] <- tmp.ignore$sd.beta^2
+  }
+
   
   if (include.updates) {cat("done\n")}
   return(out)
@@ -332,6 +338,6 @@ Estimation.IPW <- function(Y=Y, Cov=Cov, Weights, Var.Weights, max.miss.C=0.05, 
 
 Ignore.Missing <- function(Y, Cov, ind.int=1) {
   z <- lapply(X = 1:nrow(Y), function(g){ out <- list(); ind.id <- !is.na(Y[g,]); y <- Y[g,ind.id]; cov <- cbind(Cov[ind.id,]); hess.g <- solve(t(cov)%*%cov); out$beta <- as.vector(hess.g%*%t(cov)%*%y); sigma2 <- sum((y-cov%*%out$beta)^2)/(nrow(cov)-ncol(cov)); out$z <- out$beta/sqrt(sigma2*diag(hess.g)); return(out) })
-  return(list(p=2*pnorm(-abs(unlist(lapply(z, function(x){x$z[ind.int]})))), beta=unlist(lapply(z, function(x){x$beta[ind.int]}))))
+  return(list(p=2*pnorm(-abs(unlist(lapply(z, function(x){x$z[ind.int]})))), beta=unlist(lapply(z, function(x){x$beta[ind.int]})), sd.beta=unlist(lapply(z, function(x){x$beta[ind.int]/x$z[ind.int]}))))
 }
   
