@@ -10,7 +10,9 @@ EstimateMissing(Y, K = 10, max.missing.consider = 0.5, Cov = NULL,
   t.df = 4, p.min.1 = 0, p.min.2 = 0, n.boot.J = 150,
   Model.Pvalue = T, BH.analyze.min = 0.2, min.quant.5 = 5,
   shrink.Est = T, prop.y0.sd = 0.2, prop.a.sd = 0.2,
-  n.iter.MCMC = 20000, n.burn.MCMC = 1000, min.prob.MCMC = 1/n)
+  n.iter.MCMC = 20000, n.burn.MCMC = 1000, min.prob.MCMC = 1/n,
+  Bayes.est = c("FullBayes", "FullBayes_ind", "EmpBayes"),
+  simple.average.EB = F)
 }
 \arguments{
 \item{Y}{a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.}

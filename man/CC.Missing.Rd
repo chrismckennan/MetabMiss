@@ -6,7 +6,8 @@
 \usage{
 CC.Missing(Y, X, Z = NULL, K, Miss.Mech, ind.samples = NULL,
   max.miss.perp = 0.5, max.miss.image = 0.5, BH.min = NULL,
-  method = c("sIPW", "IPW"), include.updates = T, est.Beta = T)
+  method = c("sIPW", "IPW"), include.updates = T, est.Beta = T,
+  refine.C = F, p.refine.both = F)
 }
 \arguments{
 \item{Y}{a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.}

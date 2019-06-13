@@ -174,7 +174,7 @@ dt.gen <- function(x, df=4, p.min.1=0, p.min.2=0) {
 
 ####Empirical Bayes to estimate hyperparameters####
 
-Emp.Bayes.MuSigma <- function(Mu.g, Var.g, middle=c("mean", "median"), shift.var=0, refine.mu=T) {
+Emp.Bayes.MuSigma <- function(Mu.g, Var.g, middle=c("mean", "median"), shift.var=0, refine.mu=T, simple.average=F) {
   middle <- match.arg(middle, c("mean", "median"))
   ind.use <- !is.na(Mu.g) & !is.na(Var.g)
   Mu.g <- Mu.g[ind.use]
@@ -182,7 +182,11 @@ Emp.Bayes.MuSigma <- function(Mu.g, Var.g, middle=c("mean", "median"), shift.var
   if (middle == "median") {
     mu <- median(Mu.g)
   } else {
-    mu <- sum(Mu.g/(Var.g+shift.var))/sum(1/(Var.g+shift.var))
+    if (simple.average){
+      mu <- mean(Mu.g)
+    } else {
+      mu <- sum(Mu.g/(Var.g+shift.var))/sum(1/(Var.g+shift.var))
+    }
   }
   
   Mu.g <- Mu.g - mu
@@ -195,7 +199,7 @@ Emp.Bayes.MuSigma <- function(Mu.g, Var.g, middle=c("mean", "median"), shift.var
   if (like.inf < max(like) && ind.max > 1) {
     Phi2 <- seq(Phi[ind.max-1], Phi[ind.max+1], by=min(0.01,(Phi[ind.max+1]-Phi[ind.max-1])/5))
     like2 <- unlist(lapply(X = Phi2, FUN = function(phi){ sum(Mu.g^2/Var.g/(1+Var.g*phi) - log(1+Var.g*phi) + log(phi)) }))
-    if (refine.mu && middle == "mean") {
+    if (refine.mu && middle == "mean" && !simple.average) {
       return(Emp.Bayes.MuSigma(Mu.g = Mu.g+mu, Var.g = Var.g, middle = "mean", shift.var = 1/Phi2[which.max(like2)], refine.mu = F))
     }
     return(list(mu=mu, sd=1/sqrt(Phi2[which.max(like2)]), like=like, Phi=Phi))
@@ -210,7 +214,7 @@ Emp.Bayes.MuSigma <- function(Mu.g, Var.g, middle=c("mean", "median"), shift.var
 
 ##EB on both a and y0 simultaneously##
 
-Emp.Bayes.MuSigma.Both <- function(Mu, Var) {
+Emp.Bayes.MuSigma.Both <- function(Mu, Var, simple.average=F) {
   out <- list()
   ind.use <- unlist(lapply(X = 1:nrow(Mu), function(g){if (sum(is.na(Mu[g,])) > 0){return(F)}; if (is.na(Var[[g]])){return(F)}; if (class( try(expr = {solve(Var[[g]])}, silent = T) ) == "try-error"){return(F)}; tmp.s <- svd(Var[[g]]); if (tmp.s$d[1]/tmp.s$d[2] > 1e6){return(F)}; return(T)}))
   Mu <- Mu[ind.use,]
@@ -218,8 +222,8 @@ Emp.Bayes.MuSigma.Both <- function(Mu, Var) {
   Var <- lapply(which(ind.use==T), function(g){Var[[g]]})
   p <- nrow(Mu)
   
-  Emp.a <- Emp.Bayes.MuSigma(Mu.g = Mu[,1], Var.g = unlist(lapply(1:p,function(g){Var[[g]][1,1]})), middle = "mean", refine.mu = T)
-  Emp.y0 <- Emp.Bayes.MuSigma(Mu.g = Mu[,2], Var.g = unlist(lapply(1:p,function(g){Var[[g]][2,2]})), middle = "mean", refine.mu = T)
+  Emp.a <- Emp.Bayes.MuSigma(Mu.g = Mu[,1], Var.g = unlist(lapply(1:p,function(g){Var[[g]][1,1]})), middle = "mean", refine.mu = T, simple.average = simple.average)
+  Emp.y0 <- Emp.Bayes.MuSigma(Mu.g = Mu[,2], Var.g = unlist(lapply(1:p,function(g){Var[[g]][2,2]})), middle = "mean", refine.mu = T, simple.average = simple.average)
   mu <- c(Emp.a$mu, Emp.y0$mu)
   out$mu <- mu
   var.a <- max(Emp.a$sd^2, 1e-2)

@@ -79,3 +79,9 @@ EstC.0 <- function(Y, K, Cov=NULL, max.miss=0.05, max.iter=100, tol=1e-6, n.repe
   C <- C %*% svd(t(BL[,(d+1):(d+K)]/Sigma)%*%BL[,(d+1):(d+K)])$u
   return(list(C=C, W=cbind(Cov,C), LtSigmaL=svd(t(BL[,(d+1):(d+K)]/Sigma)%*%BL[,(d+1):(d+K)])$d/p, log.like=log.like.vec, Sigma=Sigma))
 }
+
+Compute.Q <- function(X) {
+  X <- cbind(X)
+  qr.X <- qr(X)
+  return( qr.Q(qr.X, complete = T)[,(qr.X$rank+1):nrow(X)] )
+}

@@ -1,4 +1,5 @@
 library(parallel)
+library(sva)
 ####Estimate missingness mechanism from metabolite data matrix####
 
 #' Estimate the metabolite-dependent missingness mechanisms
@@ -19,11 +20,13 @@ library(parallel)
 #' @return A list \item{Post.Theta}{\code{p} x 2 matrix containing the posterior expectations of the scale and location parameters (a,y0) for each metabolite. Returns \code{NA} for metabolites without a missingness mechansim.} \item{Post.Var}{A list of \code{p} 2x2 matrices containing the posterior variances for (a,y0) for each metabolite.} \item{Post.W}{A \code{p}x\code{n} containing the posterior expectations of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.VarW}{A \code{p}x\code{n} containing the posterior variances of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.Pi}{A \code{p}x\code{n} containing the posterior expectations of P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Pi.MAR}{A \code{p}x\code{n} containing estimate of P(Metab is observed | Latent covariates). This helps stabilize the inverse probability weights in downstream estimation.} \item{Theta.Miss}{\code{p} x 2 matrix with the estimates of the unshrunk GMM scale and location parameters a, y0 for each metabolite's missingness mechanism. If a missingness mechansism was not estimated, returns \code{NA}.} \item{Pvalue.value}{The J-test P-value that tests the null hypothesis H_0: Missingness mechanism is correct} \item{Ind.Confident}{A logical \code{p}-vector containing the indices of metabolites whose missingness mechanisms we are confident in.} \item{Emp.Bayes.loga}{Empirical Bayes estimate of E(log(a))} \item{Emp.Bayes.y0}{Empirical Bayes estimate of E(y0)}
 #'
 #' @export
-EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.miss.C = 0.05, max.iter.C = 400, n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a=0.1, max.a=7, min.y0=10, max.y0=30, t.df=4, p.min.1=0, p.min.2=0, n.boot.J=150, Model.Pvalue=T, BH.analyze.min=0.2, min.quant.5=5, shrink.Est=T, prop.y0.sd = 0.2, prop.a.sd = 0.2, n.iter.MCMC = 2e4, n.burn.MCMC = 1e3, min.prob.MCMC = 1/n) {
+EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.miss.C = 0.05, max.iter.C = 400, n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a=0.1, max.a=7, min.y0=10, max.y0=30, t.df=4, p.min.1=0, p.min.2=0, n.boot.J=150, Model.Pvalue=T, BH.analyze.min=0.2, min.quant.5=5, shrink.Est=T, prop.y0.sd = 0.2, prop.a.sd = 0.2, n.iter.MCMC = 2e4, n.burn.MCMC = 1e3, min.prob.MCMC = 1/n, Bayes.est = c("FullBayes", "FullBayes_ind", "EmpBayes"), simple.average.EB=F) {
   p <- nrow(Y)
   n <- ncol(Y)
   Prob.Missing <- apply(X = Y, MARGIN = 1, function(x) {mean(is.na(x))})
-  if (is.null(Cov)) {Cov <- cbind(rep(1,n))}
+  if (is.null(Cov)) {
+    Cov <- cbind(rep(1,n))
+  } else {Cov <- cbind(Cov)}
   out <- list()
   out$max.miss.C <- max.miss.C
   
@@ -34,45 +37,61 @@ EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.m
   W <- out.C$W
   out$C <- out.C$C
   cat("done\n")  
-    
   
-  ###Preliminary estimate for missingness###
-  n_cores <- max(detectCores() - 1, 1)
-  cat(paste("Preliminary estimate of missingness mechanism using", n_cores, "cores..."))
-  Exp.FI <- solve(t(out.C$W)%*%out.C$W)
   ind.missing <- which(Prob.Missing > max.miss.C & Prob.Missing <= max.missing.consider)
-  Tstat.start <- matrix(NA, p, K+1)
-  
-  cl <- makeCluster(n_cores)
-  clusterExport(cl = cl, c("min.a", "max.a", "min.y0", "max.y0", "C", "W", "Exp.FI", "n.K.GMM", "t.df", "p.min.1", "p.min.2"), envir=environment())
-  clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")})
-  Tstat.start[ind.missing,] <- t( parApply(cl = cl, X = Y[ind.missing,], MARGIN = 1, function(y.g) {
-    ind.g <- !is.na(y.g)
-    miss.g <- Opt.GMM.t.grid(A.grid = seq(min.a,max.a,by=0.05), Pos.Grid = seq(min.y0,max.y0,by=0.2), y = y.g, C = C, K.ind = 1:n.K.GMM, n.iter = 2, t.df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)
-    prob.obs.g <- pt.gen(x = miss.g$a*y.g[ind.g]-miss.g$y0, df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)
-    prob.obs.g[prob.obs.g < 0.05] <- 0.05
-    
-    gamma.g <- solve(t(W[ind.g,]/prob.obs.g)%*%W[ind.g,], t(W[ind.g,]/prob.obs.g)%*%y.g[ind.g])
-    resids.g <- W[ind.g,] * as.vector((y.g[ind.g] - W[ind.g,]%*%gamma.g))
-    Var.g <- Exp.FI %*% (t(resids.g/prob.obs.g^2)%*%resids.g) %*% Exp.FI
-    return(gamma.g / sqrt(diag(Var.g)))
-  }) )
-  stopCluster(cl)
-
-  cat("done\n")
-  d <- ncol(out.C$W) - K
-  Qvalues <- matrix(NA, nrow=p, ncol=K)
   out$InitialPvalues <- matrix(NA, nrow=p, ncol=K)
+  Qvalues <- matrix(NA, nrow=p, ncol=K)
   max.H1 <- 0.5  #Maximum p-value to be considered H1. To be used if q-value fails
+  for (g in ind.missing) {
+    y.g <- Y[g,]
+    out$InitialPvalues[g,] <- unlist(lapply(X = 1:K, function(k, y.g, Cov, C){ my.OLS(y = y.g[!is.na(y.g)], X = cbind(Cov,C[,k])[!is.na(y.g),])$p.value[ncol(Cov)+1] }, y.g=y.g, Cov=Cov, C=C))
+  }
   for (k in 1:K) {
-    ind.k <- !is.na(Tstat.start[,d+k])
-    p.k <- 2*pnorm(-abs(Tstat.start[ind.k,d+k])); out$InitialPvalues[ind.k,k] <- p.k
+    ind.k <- !is.na(out$InitialPvalues[,k])
+    p.k <- out$InitialPvalues[ind.k,k]
     try.k <- try(expr = {Q.k <- qvalue::qvalue(p.k); Qvalues[ind.k,k] <- Q.k$qvalues}, silent = TRUE)
     if (class(try.k) == "try-error") {
       n.0.k <- sum(p.k > max.H1)/(1-max.H1)
       Qvalues[ind.k,k] <- p.k*n.0.k/unlist(lapply(p.k, function(p.kg){sum(p.k<=p.kg)}))
     }
   }
+
+  #  ###Preliminary estimate for missingness###
+  #  n_cores <- max(detectCores() - 1, 1)
+  #  cat(paste("Preliminary estimate of missingness mechanism using", n_cores, "cores..."))
+  #  Exp.FI <- solve(t(out.C$W)%*%out.C$W)
+  #  Tstat.start <- matrix(NA, p, K+1)
+  #  
+  #  cl <- makeCluster(n_cores)
+  #  clusterExport(cl = cl, c("min.a", "max.a", "min.y0", "max.y0", "C", "W", "Exp.FI", "n.K.GMM", "t.df", "p.min.1", "p.min.2"), envir=environment())
+  #  clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")})
+  #  Tstat.start[ind.missing,] <- t( parApply(cl = cl, X = Y[ind.missing,], MARGIN = 1, function(y.g) {
+  #    ind.g <- !is.na(y.g)
+  #    miss.g <- Opt.GMM.t.grid(A.grid = seq(min.a,max.a,by=0.05), Pos.Grid = seq(min.y0,max.y0,by=0.2), y = y.g, C = C, K.ind = 1:n.K.GMM, n.iter = 2, t.df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)
+  #    prob.obs.g <- pt.gen(x = miss.g$a*y.g[ind.g]-miss.g$y0, df = t.df, p.min.1 = p.min.1, p.min.2 = p.min.2)
+  #    prob.obs.g[prob.obs.g < 0.05] <- 0.05
+  #    
+  #    gamma.g <- solve(t(W[ind.g,]/prob.obs.g)%*%W[ind.g,], t(W[ind.g,]/prob.obs.g)%*%y.g[ind.g])
+  #    resids.g <- W[ind.g,] * as.vector((y.g[ind.g] - W[ind.g,]%*%gamma.g))
+  #    Var.g <- Exp.FI %*% (t(resids.g/prob.obs.g^2)%*%resids.g) %*% Exp.FI
+  #    return(gamma.g / sqrt(diag(Var.g)))
+  #  }) )
+  #  stopCluster(cl)
+  #
+  #  cat("done\n")
+  #  d <- ncol(out.C$W) - K
+  #  Qvalues <- matrix(NA, nrow=p, ncol=K)
+  #  out$InitialPvalues <- matrix(NA, nrow=p, ncol=K)
+  #  max.H1 <- 0.5  #Maximum p-value to be considered H1. To be used if q-value fails
+  #  for (k in 1:K) {
+  #    ind.k <- !is.na(Tstat.start[,d+k])
+  #    p.k <- 2*pnorm(-abs(Tstat.start[ind.k,d+k])); out$InitialPvalues[ind.k,k] <- p.k
+  #    try.k <- try(expr = {Q.k <- qvalue::qvalue(p.k); Qvalues[ind.k,k] <- Q.k$qvalues}, silent = TRUE)
+  #    if (class(try.k) == "try-error") {
+  #      n.0.k <- sum(p.k > max.H1)/(1-max.H1)
+  #      Qvalues[ind.k,k] <- p.k*n.0.k/unlist(lapply(p.k, function(p.kg){sum(p.k<=p.kg)}))
+  #    }
+  #  }
   
   
   ###Estimate missingness mechanism parameters with GMM###
@@ -92,10 +111,11 @@ EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.m
   clusterExport(cl = cl, c("Model.Pvalue", "min.a", "max.a", "min.y0", "max.y0", "C", "n.K.GMM", "t.df", "p.min.1", "p.min.2", "n.boot.J"), envir=environment())
   clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")
                                 source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/BayesianGMM.R")})
-  out.tmp <- parLapply( cl = cl, X = lapply(ind.missing, function(g){return(list(y=Y[g,], t.stat=Tstat.start[g,-1], q=Qvalues[g,]))}), function(ll){
+  out.tmp <- parLapply( cl = cl, X = lapply(ind.missing, function(g){return(list(y=Y[g,], t.stat=Qvalues[g,], q=Qvalues[g,]))}), function(ll){
     out.par <- list()
     y.g <- ll$y
-    K.ind.g <- order(-abs(ll$t.stat))[1:n.K.GMM]
+    #K.ind.g <- order(-abs(ll$t.stat))[1:n.K.GMM]
+    K.ind.g <- order(ll$q)[1:n.K.GMM]
     
     #MAR fit#
     tmp <- glm.fit(x = Get.U(C = C, K.ind = K.ind.g), y = as.numeric(!is.na(ll$y)), family = binomial())
@@ -158,15 +178,17 @@ EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.m
   
   ###Empirical Bayes to estimate prior for a and y0 and then MCMC to get posterior expectations and variances###
   if (shrink.Est) {
+    Bayes.est <- match.arg(Bayes.est, choices = c("FullBayes", "FullBayes_ind", "EmpBayes"))
+    out$Bayes.est <- Bayes.est
+    
     #Empirical Bayes#
     Emp.Bayes.both <- Emp.Bayes.MuSigma.Both(Mu = cbind(log(out$Theta.Miss[ind.q,1]),out$Theta.Miss[ind.q,2]),
-                                             Var = lapply( X = which(ind.q==T), function(g){tmp <- out$Var.Theta[[g]]; if (is.null(tmp)){(return(NA))}; diag(c(1/out$Theta.Miss[g,1],1))%*%tmp%*%diag(c(1/out$Theta.Miss[g,1],1))} ))
-    out$Emp.Bayes.loga <- Emp.Bayes.MuSigma(Mu.g = log(out$Theta.Miss[ind.q,1]), Var.g = unlist(lapply(X=out$Var.Theta[ind.q],function(x){x[1,1]}))/out$Theta.Miss[ind.q,1]^2, middle = "mean", shift.var = 0, refine.mu = T)
-    out$Emp.Bayes.y0 <- Emp.Bayes.MuSigma(Mu.g = out$Theta.Miss[ind.q,2], Var.g = unlist(lapply(X=out$Var.Theta[ind.q],function(x){x[2,2]})), middle = "mean", shift.var = 0, refine.mu = T)
+                                             Var = lapply( X = which(ind.q==T), function(g){tmp <- out$Var.Theta[[g]]; if (is.null(tmp)){(return(NA))}; diag(c(1/out$Theta.Miss[g,1],1))%*%tmp%*%diag(c(1/out$Theta.Miss[g,1],1))} ), simple.average=simple.average.EB)
+    out$Emp.Bayes.loga <- Emp.Bayes.MuSigma(Mu.g = log(out$Theta.Miss[ind.q,1]), Var.g = unlist(lapply(X=out$Var.Theta[ind.q],function(x){x[1,1]}))/out$Theta.Miss[ind.q,1]^2, middle = "mean", shift.var = 0, refine.mu = T, simple.average=simple.average.EB)
+    out$Emp.Bayes.y0 <- Emp.Bayes.MuSigma(Mu.g = out$Theta.Miss[ind.q,2], Var.g = unlist(lapply(X=out$Var.Theta[ind.q],function(x){x[2,2]})), middle = "mean", shift.var = 0, refine.mu = T, simple.average=simple.average.EB)
     out$V.prior <- Emp.Bayes.both$V
     out$mu.prior <- Emp.Bayes.both$mu
     
-    #MCMC with covariance term = 0#
     out$Post.W <- matrix(1, nrow=p, ncol=n)
     out$Post.VarW <- matrix(1, nrow=p, ncol=n)
     out$Post.Theta <- matrix(NA, nrow=p, ncol=2)
@@ -175,23 +197,49 @@ EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.m
     
     ind.q.MCMC <- !is.na(out$Theta.Miss[,1])
     
-    n_cores <- max(detectCores() - 1, 1)
-    cat(paste("MCMC using", n_cores, "cores..."))
-    cl <- makeCluster(n_cores)
-    clusterExport(cl = cl, c("C", "t.df", "p.min.1", "p.min.2", "Emp.Bayes.both", "prop.y0.sd", "prop.a.sd", "n.iter.MCMC", "n.burn.MCMC", "min.prob.MCMC"), envir=environment())
-    clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")
-      source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/BayesianGMM.R")})
-    out.MCMC <- parLapply(cl = cl, X = lapply(which(ind.q.MCMC==T),function(g){return(list(K.ind=out$K.mat[g,], y=Y[g,], y0=out$Theta.Miss[g,2], a=out$Theta.Miss[g,1]))}), function(ll) {
-      out.Bayes.g <- Bayes.GMM(y = ll$y, C = C, K.ind = ll$K.ind, p.min.1 = p.min.1, p.min.2 = p.min.2, t.df = t.df, y0.mean = Emp.Bayes.both$mu[2], log.a.mean = Emp.Bayes.both$mu[1], V = diag(diag(Emp.Bayes.both$V)), y0.start = ll$y0, a.start = ll$a, prop.y0.sd = prop.y0.sd, prop.a.sd = prop.a.sd, n.iter = n.iter.MCMC, n.burn = n.burn.MCMC, save.every = 0, include.norm = T, min.prob = min.prob.MCMC)
-      return(list( theta=out.Bayes.g$Post.Exp, Var=out.Bayes.g$Post.Var, W=out.Bayes.g$Post.Exp.W, Pi=out.Bayes.g$Post.Exp.Pi, Var.W=out.Bayes.g$Post.Var.W ))
-    })
-    stopCluster(cl)
-    cat("done\n")
-    out$Post.Theta[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$theta}))
-    out$Post.Var[which(ind.q.MCMC==T)] <- lapply(X = out.MCMC, function(x){x$Var})
-    out$Post.W[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$W}))
-    out$Post.VarW[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$Var.W}))
-    out$Post.Pi[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$Pi}))
+    if (Bayes.est == "FullBayes") {
+      out.dep <- Bayes.GMM.Dependent(Y = Y[ind.q.MCMC,], C = C, K.ind = out$K.mat[ind.q.MCMC,], ind.variance = which(out$Ind.Confident[ind.q.MCMC] == T), p.min.1 = p.min.1, p.min.2 = p.min.2, t.df = t.df, y0.mean = Emp.Bayes.both$mu[2], log.a.mean = Emp.Bayes.both$mu[1], y0.start = out$Theta.Miss[ind.q.MCMC,2], a.start = out$Theta.Miss[ind.q.MCMC,1], n.iter = n.iter.MCMC, n.burn = n.burn.MCMC, prop.y0.sd = prop.y0.sd, prop.a.sd = prop.a.sd, include.norm = T, min.prob = min.prob.MCMC)
+      out$Post.Theta[which(ind.q.MCMC==T),] <- out.dep$Post.Exp
+      out$Post.Var[which(ind.q.MCMC==T)] <- out.dep$Post.Var
+      out$Post.W[which(ind.q.MCMC==T),] <- out.dep$Post.Exp.W
+      out$Post.VarW[which(ind.q.MCMC==T),] <- out.dep$Post.Var.W
+      out$Post.Pi[which(ind.q.MCMC==T),] <- out.dep$Post.Exp.Pi
+      out$Post.Exp.Var <- out.dep$Post.exp.Var
+      out$Post.Var.Var <- out.dep$Post.Var.Var
+    }
+    
+    if (Bayes.est == "FullBayes_ind") {
+      out.indep <- Bayes.GMM.ind(Y = Y[ind.q.MCMC,], C = C, K.ind = out$K.mat[ind.q.MCMC,], ind.variance = which(out$Ind.Confident[ind.q.MCMC] == T), p.min.1 = p.min.1, p.min.2 = p.min.2, t.df = t.df, y0.mean = Emp.Bayes.both$mu[2], log.a.mean = Emp.Bayes.both$mu[1], y0.start = out$Theta.Miss[ind.q.MCMC,2], a.start = out$Theta.Miss[ind.q.MCMC,1], prop.y0.sd = prop.y0.sd, prop.a.sd = prop.a.sd, n.iter = n.iter.MCMC, n.burn = n.burn.MCMC, include.norm = T, min.prob = min.prob.MCMC)
+      out$Post.Theta[which(ind.q.MCMC==T),] <- out.indep$Post.Exp
+      out$Post.Var[which(ind.q.MCMC==T)] <- out.indep$Post.Var
+      out$Post.W[which(ind.q.MCMC==T),] <- out.indep$Post.Exp.W
+      out$Post.VarW[which(ind.q.MCMC==T),] <- out.indep$Post.Var.W
+      out$Post.Pi[which(ind.q.MCMC==T),] <- out.indep$Post.Exp.Pi
+      out$Post.Exp.Var <- out.indep$Post.exp.Var
+      out$Post.Var.Var <- out$Post.Var.Var
+    }
+    
+    if (Bayes.est == "EmpBayes") {
+      #MCMC with covariance term = 0#
+      n_cores <- max(detectCores() - 1, 1)
+      cat(paste("MCMC using", n_cores, "cores..."))
+      cl <- makeCluster(n_cores)
+      clusterExport(cl = cl, c("C", "t.df", "p.min.1", "p.min.2", "Emp.Bayes.both", "prop.y0.sd", "prop.a.sd", "n.iter.MCMC", "n.burn.MCMC", "min.prob.MCMC"), envir=environment())
+      clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")
+        source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/BayesianGMM.R")})
+      out.MCMC <- parLapply(cl = cl, X = lapply(which(ind.q.MCMC==T),function(g){return(list(K.ind=out$K.mat[g,], y=Y[g,], y0=out$Theta.Miss[g,2], a=out$Theta.Miss[g,1]))}), function(ll) {
+        out.Bayes.g <- Bayes.GMM(y = ll$y, C = C, K.ind = ll$K.ind, p.min.1 = p.min.1, p.min.2 = p.min.2, t.df = t.df, y0.mean = Emp.Bayes.both$mu[2], log.a.mean = Emp.Bayes.both$mu[1], V = diag(diag(Emp.Bayes.both$V)), y0.start = ll$y0, a.start = ll$a, prop.y0.sd = prop.y0.sd, prop.a.sd = prop.a.sd, n.iter = n.iter.MCMC, n.burn = n.burn.MCMC, save.every = 0, include.norm = T, min.prob = min.prob.MCMC)
+        return(list( theta=out.Bayes.g$Post.Exp, Var=out.Bayes.g$Post.Var, W=out.Bayes.g$Post.Exp.W, Pi=out.Bayes.g$Post.Exp.Pi, Var.W=out.Bayes.g$Post.Var.W ))
+      })
+      stopCluster(cl)
+      cat("done\n")
+      out$Post.Theta[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$theta}))
+      out$Post.Var[which(ind.q.MCMC==T)] <- lapply(X = out.MCMC, function(x){x$Var})
+      out$Post.W[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$W}))
+      out$Post.VarW[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$Var.W}))
+      out$Post.Pi[which(ind.q.MCMC==T),] <- t(sapply(X = out.MCMC, function(x){x$Pi}))
+    }
+
   }
   out$ind.analyze <- sort(c(which(Prob.Missing <= max.miss.C), which(ind.q.MCMC == T)))
   return(out)
@@ -361,5 +409,79 @@ BH.proc <- function(p, alpha=0.25) {
   }
   Reject[!is.na(p)] <- Reject.obs
   return(Reject)
+}
+
+######OLS######
+
+my.OLS <- function(y, X, d.add = 0) {
+  n <- length(y)
+  X <- cbind(X)
+  d <- ncol(X)
+  hess <- solve(t(X)%*%X)
+  beta.hat <- hess%*%t(X)%*%y
+  resids <- as.vector(y - X %*% beta.hat)
+  sigma2.hat <- sum( resids^2 ) / (n - d - d.add)
+  var.inflated.beta <- hess%*%(t(X * (resids^2 / ( 1-rowSums((X%*%hess)*X) )^2)) %*% X)%*%hess
+  return(list(beta=beta.hat, var.beta.hat=sigma2.hat*diag(hess), var.inflated.beta=diag(var.inflated.beta), sigma2=sigma2.hat, p.value=2*pnorm(-abs( beta.hat / sqrt(sigma2.hat) / sqrt(diag( hess )) ))))
+}
+
+######Choose the number of potential instruments######
+
+#' Choose the number of potential instruments
+
+#' Choose the number of potential instruments using a q-value threshold
+#' @export
+Num.Instruments <- function(Y, Cov=NULL, max.miss.C = 0.05, max.missing.consider=0.5, K.max=NULL, q.thresh=c(0.01, 0.05, 0.1)) {
+  p <- nrow(Y)
+  n <- ncol(Y)
+  if (is.null(Cov)) {Cov <- rep(1,n)}
+  Cov <- cbind(Cov); d <- ncol(Cov)
+  Frac.Missing <- rowMeans(is.na(Y))
+  if (is.null(K.max)) {K.max <- sva::num.sv(dat = Y[Frac.Missing==0,], mod = Cov)}
+  N1.thresh <- matrix(NA, nrow=K.max, ncol=length(q.thresh))
+  if (d == 1) {N2.thresh <- matrix(NA, nrow=K.max, ncol=length(q.thresh))}
+  
+  max.H1 <- 0.5  #Maximum p-value to be considered H1. To be used if q-value fails
+  ind.missing <- which((Frac.Missing > max.miss.C & Frac.Missing <= max.missing.consider) == T)
+  for (K in 2:K.max) {
+    cat(paste0("K = ", K, "/", K.max, "..."))
+    C <- EstC.0(Y = Y, K = K, Cov = Cov, max.miss = max.miss.C, max.iter = 1000, n.repeat.Sigma = 1)$C
+    
+    Q.K <- matrix(NA, nrow=p, ncol=K)
+    InitialPvalues <- matrix(NA, nrow=p, ncol=K)
+    for (g in ind.missing) {
+      y.g <- Y[g,]
+      InitialPvalues[g,] <- unlist(lapply(X = 1:K, function(k, y.g, Cov, C){ my.OLS(y = y.g[!is.na(y.g)], X = cbind(Cov,C[,k])[!is.na(y.g),])$p.value[ncol(Cov)+1] }, y.g=y.g, Cov=Cov, C=C))
+    }
+    for (k in 1:K) {
+      ind.k <- !is.na(InitialPvalues[,k])
+      p.k <- InitialPvalues[ind.k,k]
+      try.k <- try(expr = {Q.k <- qvalue::qvalue(p.k); Q.K[ind.k,k] <- Q.k$qvalues}, silent = TRUE)
+      if (class(try.k) == "try-error") {
+        n.0.k <- sum(p.k > max.H1)/(1-max.H1)
+        Q.K[ind.k,k] <- p.k*n.0.k/unlist(lapply(p.k, function(p.kg){sum(p.k<=p.kg)}))
+      }
+    }
+    
+    Min.Q.K <- apply(X = Q.K, MARGIN = 1, min)
+    for (j in 1:length(q.thresh)) {
+      N1.thresh[K,j] <- sum(Min.Q.K <= q.thresh[j], na.rm = T) / length(ind.missing)
+    }
+    if (d == 1) {
+      Min2.Q.K <- apply(X = Q.K, MARGIN = 1, function(x){sort(x)[2]})
+      for (j in 1:length(q.thresh)) {
+        N2.thresh[K,j] <- sum(Min2.Q.K <= q.thresh[j], na.rm = T) / length(ind.missing)
+      }
+    }
+    cat("done\n")
+  }
+  rownames(N1.thresh) <- 1:K.max
+  colnames(N1.thresh) <- q.thresh
+  if (d == 1) {
+    rownames(N2.thresh) <- 1:K.max
+    colnames(N2.thresh) <- q.thresh
+    return(list(Frac1=N1.thresh, Frac2=N2.thresh))
+  }
+  return(list(Frac1=N1.thresh))
 }
 
