@@ -8,7 +8,7 @@ Authors@R:
            role = c("aut", "cre"),
            email = "cgm29@uchicago.edu")
 Description: Estimate and account for non-ignorable missing data and latent confounding in mass spectrometry data, with application to metabolomic and proteomic experiments. There are two main functions. "EstimateMissing" estimates the metabolite/protein-dependent missingness mechanisms. This only has to be done once per dataset, and the output should be stored with the data. "CC.Missing" estimates latent confounding factors and does estimation and inference on the coefficients of interest in a multivariate linear model using the estimated missingness mechanisms.
-Depends: parallel, qvalue
+Depends: parallel, qvalue, sva
 License: GPL-2
 Encoding: UTF-8
 LazyData: true
