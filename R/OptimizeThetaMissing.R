@@ -1,7 +1,6 @@
-library(quantreg)
-library(sn)
-library(mvtnorm)
-library(pbivnorm)
+#library(quantreg)
+#library(sn)
+#library(pbivnorm)
 
 ###Get starting points for Gamma and C###
 #Y is p x n

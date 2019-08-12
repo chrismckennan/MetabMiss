@@ -7,20 +7,20 @@ library(qvalue)
 #'
 #' Estimate latent covariates and estimate/do inference on the coefficients of interest in a multivariate linear model with stabilized inverse probability weighting (sIPW) using estimated missingness mechansim.
 #'
-#' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
+#' @param Y a \code{p} x \code{n} data matrix of log-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
 #' @param X a \code{n} x \code{d} matrix of covariates of interest (i.e. disease status).
 #' @param Z a \code{n} x \code{r} matrix of observed nuisance covariates (i.e. the intercept, observed technical factors, etc.)
-#' @param K The number of latent covariates (i.e. C is a \code{n} x \code{K} matrix). We recommend using sva::num.sv to estimate it, available from the SVA package.
+#' @param K The number of latent covariates (i.e. C is a \code{n} x \code{K} matrix). If null, it is estimated using sva::num.sv applied to the metabolites with complete data.
 #' @param Miss.Mech The missingness mechansim object returned by \code{EstimateMissing}.
 #' @param ind.samples A logical or numeric vector of samples to be considered in the analysis. For example, if disease status were only measured in a subset of the patients, this would be the samples with a recorded disease status. Default is no missing samples.
 #' @param est.Beta A logical indicating whether or not to estimate/do inference on coefficients of interest. If \code{F}, only the latent covariates are estimated. Defaults to \code{T}.
 #' @param max.miss.perp Maximum fraction of missing data a metabolite is allowed to have to be used to calculate the part of C perpendicular to X. Defaults to 0.5.
 #' @param max.miss.image Maximum fraction of missing data a metabolite is allowed to have to be used to calculate the part of C in the image of X. Defaults to 0.5.
 #' 
-#' @return A list \item{C.corr}{The estimate of the \code{n} x \code{K} matrix of latent covariates.} \item{Beta.corr}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest.} \item{p.t.corr}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest.} \item{L}{The estimate of the \code{p} x \code{K} matrix of coefficients for the latent covariates.} \item{Beta.naive}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest that ignores C. This should ONLY be used for comparison.} \item{p.t.naive}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest that ignore C. This should ONLY be used for comparison.}
+#' @return A list \item{C.iter}{The estimate of the \code{n} x \code{K} matrix of latent covariates.} \item{Beta.iter}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest.} \item{p.t.iter}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest.} \item{Var.beta.iter}{A length \code{p} list of the \code{d} x \code{d} estimates for Var(Beta.iter)} \item{t.iter}{A \code{p} x \code{d} matrix of t-statistics, defined as Beta.iter/SE(Beta.iter)} \item{p.f.iter}{A length \code{p} vector of F-statistic p-values for the null hypothesis that X has no effect on metabolite intensity. It is only returned if \code{d} > 1.} \item{L}{The estimate of the \code{p} x \code{K} matrix of coefficients for the latent covariates.} \item{Beta.naive}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest that ignores C. This should ONLY be used for comparison.} \item{p.t.naive}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest that ignore C. This should ONLY be used for comparison.}
 #'
 #' @export
-CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.perp=0.5, max.miss.image=0.5, BH.min=NULL, method = c("sIPW", "IPW"), include.updates=T, est.Beta=T, refine.C=F, p.refine.both=F) {
+CC.Missing <- function(Y, X, Z=NULL, K=NULL, Miss.Mech, ind.samples=NULL, max.miss.perp=0.5, max.miss.image=0.5, BH.min=NULL, method = c("sIPW", "IPW"), include.updates=T, est.Beta=T, refine.C=F, p.refine.both=F, return.all=F) {
   method <- match.arg(method, c("sIPW", "IPW"))
   max.miss.C <- Miss.Mech$max.miss.C
   X <- cbind(X); Z <- cbind(Z)
@@ -45,7 +45,7 @@ CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.pe
   d <- ncol(X)
   p <- nrow(Y)
   n <- ncol(Y)
-  Prob.Missing <- apply(X = Y, MARGIN = 1, function(x) {mean(is.na(x))})
+  Prob.Missing <- rowMeans(is.na(Y))
   out$X <- X; out$Z <- Z; out$method <- method
   ind.miss.all <- !is.na(Miss.Mech$Theta.Miss[,1]) & !is.na(Miss.Mech$Theta.Miss[,2])  #Metabolites with missing data
   if (is.null(BH.min)) {BH.min <- Miss.Mech$BH.min}
@@ -55,6 +55,8 @@ CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.pe
   out$flag.analyzed <- !(tmp == FALSE & !is.na(tmp)) & ind.miss.all    #Metabolites that have reported p-values, but the missingness mechanism is suspect
   
   ####Initial estimate for C.perp####
+  #If K is null, estimate it with sva::num.sv
+  if (is.null(K)) {K <- sva::num.sv(dat = Y[Prob.Missing==0,], mod = cbind(out$X,out$Z))}; out$K <- K
   if (include.updates) {cat(paste("Estimating", K, "latent factors...", collapse = ""))}
   out.C <- EstC.0(Y = Y, K = K, Cov = cbind(X,Z), max.miss = max.miss.C, max.iter = 800, n.repeat.Sigma = 1)
   out$C.perp <- out.C$C
@@ -65,7 +67,7 @@ CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.pe
   Y1L.tmp <- t(apply(X = Y[Prob.Missing <= max.miss.C,], MARGIN = 1, function(y){ind.obs.y<-!is.na(y); (solve(t(tmp.cov.ignore[ind.obs.y,])%*%tmp.cov.ignore[ind.obs.y,],t(tmp.cov.ignore[ind.obs.y,])%*%y[ind.obs.y]))[1:(d+K)]}))
   Omega.ignore.tmp <- t(cbind(Y1L.tmp[,1:d]))%*%Y1L.tmp[,(d+1):(d+K)]%*%solve(t(Y1L.tmp[,(d+1):(d+K)])%*%Y1L.tmp[,(d+1):(d+K)])
   if (d == 1) {Omega.ignore.tmp <- rbind(as.vector(Omega.ignore.tmp))}
-  out$C.ignore.miss <- X%*%Omega.ignore.tmp + out$C.perp
+  if (return.all) {out$C.ignore.miss <- X%*%Omega.ignore.tmp + out$C.perp}
   
   ####Determine Weights####
   if (method == "sIPW") {
@@ -179,7 +181,7 @@ CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.pe
   out$C.corr <- out$X %*% t(out$Omega.corr) + out$C.perp
   out$C.iter <- out$X %*% t(out$Omega.iter) + out$C.perp
   
-  if (refine.C) {  #Refine C using IRW-SVA-like procedure with out$C.corr as a starting point
+  if (refine.C && return.all) {  #Refine C using IRW-SVA-like procedure with out$C.corr as a starting point
     tmp.IRW <- IRW.C(Y = Y, X = out$X, C = out$C.corr, Z = out$Z, Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.perp = ind.perp, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C, p.naive = F)
     out$C.IRW <- tmp.IRW$C
     out.tmp <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$C.IRW,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
@@ -199,14 +201,16 @@ CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.pe
     }
   }
   
-  ####Estimate and inference on B####
-  out.tmp <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$C,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
-  out$t <- out.tmp$t
-  out$p.t <- out.tmp$p.t
-  out$f <- out.tmp$f
-  out$p.f <- out.tmp$p.f
-  out$Beta <- out.tmp$Beta
-  out$Var.beta <- out.tmp$Var.beta
+  ####Estimate and inference on B without iterating####
+  if (return.all) {
+    out.tmp <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$C,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
+    out$t <- out.tmp$t
+    out$p.t <- out.tmp$p.t
+    out$f <- out.tmp$f
+    out$p.f <- out.tmp$p.f
+    out$Beta <- out.tmp$Beta
+    out$Var.beta <- out.tmp$Var.beta
+  }
   
   ####Iterative estimate for Omega####
   out.tmp <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$C.iter,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
@@ -219,11 +223,13 @@ CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.pe
   out$Sigma.iter <- out.tmp$Sigma
   
   ######Inflated estimate for Omega######
-  out.tmp <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$C.corr,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
-  out$p.t.corr <- out.tmp$p.t
-  out$Beta.corr <- out.tmp$Beta
-  out$Var.beta.corr <- out.tmp$Var.beta
-  out$Sigma.corr <- out.tmp$Sigma
+  if (return.all) {
+    out.tmp <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$C.corr,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
+    out$p.t.corr <- out.tmp$p.t
+    out$Beta.corr <- out.tmp$Beta
+    out$Var.beta.corr <- out.tmp$Var.beta
+    out$Sigma.corr <- out.tmp$Sigma
+  }
   
   ######Ignore C######
   out.tmp.naive <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
@@ -231,7 +237,7 @@ CC.Missing <- function(Y, X, Z=NULL, K, Miss.Mech, ind.samples=NULL, max.miss.pe
   out$Beta.naive <- out.tmp.naive$Beta.naive
   
   ######Ignore Missingness######
-  if (ncol(X) == 1) {
+  if (ncol(X) == 1 && return.all) {
     out$p.t.ignore.miss <- rep(NA, nrow(Y))
     out$Beta.ignore.miss <- rep(NA, nrow(Y))
     out$Var.beta.ignore.miss <- rep(NA, nrow(Y))

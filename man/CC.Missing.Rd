@@ -4,19 +4,19 @@
 \alias{CC.Missing}
 \title{Estimate latent covariates and coefficients of interest}
 \usage{
-CC.Missing(Y, X, Z = NULL, K, Miss.Mech, ind.samples = NULL,
+CC.Missing(Y, X, Z = NULL, K = NULL, Miss.Mech, ind.samples = NULL,
   max.miss.perp = 0.5, max.miss.image = 0.5, BH.min = NULL,
   method = c("sIPW", "IPW"), include.updates = T, est.Beta = T,
-  refine.C = F, p.refine.both = F)
+  refine.C = F, p.refine.both = F, return.all = F)
 }
 \arguments{
-\item{Y}{a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.}
+\item{Y}{a \code{p} x \code{n} data matrix of log-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.}
 
 \item{X}{a \code{n} x \code{d} matrix of covariates of interest (i.e. disease status).}
 
 \item{Z}{a \code{n} x \code{r} matrix of observed nuisance covariates (i.e. the intercept, observed technical factors, etc.)}
 
-\item{K}{The number of latent covariates (i.e. C is a \code{n} x \code{K} matrix). We recommend using sva::num.sv to estimate it, available from the SVA package.}
+\item{K}{The number of latent covariates (i.e. C is a \code{n} x \code{K} matrix). If null, it is estimated using sva::num.sv applied to the metabolites with complete data.}
 
 \item{Miss.Mech}{The missingness mechansim object returned by \code{EstimateMissing}.}
 
@@ -29,7 +29,7 @@ CC.Missing(Y, X, Z = NULL, K, Miss.Mech, ind.samples = NULL,
 \item{est.Beta}{A logical indicating whether or not to estimate/do inference on coefficients of interest. If \code{F}, only the latent covariates are estimated. Defaults to \code{T}.}
 }
 \value{
-A list \item{C.corr}{The estimate of the \code{n} x \code{K} matrix of latent covariates.} \item{Beta.corr}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest.} \item{p.t.corr}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest.} \item{L}{The estimate of the \code{p} x \code{K} matrix of coefficients for the latent covariates.} \item{Beta.naive}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest that ignores C. This should ONLY be used for comparison.} \item{p.t.naive}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest that ignore C. This should ONLY be used for comparison.}
+A list \item{C.iter}{The estimate of the \code{n} x \code{K} matrix of latent covariates.} \item{Beta.iter}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest.} \item{p.t.iter}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest.} \item{Var.beta.iter}{A length \code{p} list of the \code{d} x \code{d} estimates for Var(Beta.iter)} \item{t.iter}{A \code{p} x \code{d} matrix of t-statistics, defined as Beta.iter/SE(Beta.iter)} \item{p.f.iter}{A length \code{p} vector of F-statistic p-values for the null hypothesis that X has no effect on metabolite intensity. It is only returned if \code{d} > 1.} \item{L}{The estimate of the \code{p} x \code{K} matrix of coefficients for the latent covariates.} \item{Beta.naive}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest that ignores C. This should ONLY be used for comparison.} \item{p.t.naive}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest that ignore C. This should ONLY be used for comparison.}
 }
 \description{
 Estimate latent covariates and estimate/do inference on the coefficients of interest in a multivariate linear model with stabilized inverse probability weighting (sIPW) using estimated missingness mechansim.

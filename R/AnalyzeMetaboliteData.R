@@ -8,6 +8,7 @@ library(sva)
 #' 
 #' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
 #' @param K a number >= 2. This gives the number of latent covariates to use to estimate the missingness mechanism. We recommend the user use sva::num.sv on the metabolites with no missing data to get an upper bound for this number. We recommend using anything between 5 and 10. The default is 10
+#' @param n_cores The number of cores to use. The default is the number of maximum number of usable cores - 1.
 #' @param max.missing.consider The maximum fraction of missing data a metabolite is allowed to have. Missingness mechanisms will NOT be estimated for metabolites with more missing data than this. Default is 0.5
 #' @param max.miss.C Maximum fraction of missing data a metabolite can have to ignore the missingness mechanism in downstream estimation and inference. The default is 0.05.
 #' @param max.iter.C Maximum number of iterations to estimate the latent covariates C. Default is 400 and should not be changed.
@@ -17,10 +18,10 @@ library(sva)
 #' @param n.K.GMM Number of additional terms (besides the intercept) to be considered in GMM when estimating the missingness mechanism. The default (and recommendend value) is 2. If changed, this must be >= 2
 #' @param Model.Pvalue A logical value. If \code{T}, a missingness model P-value is computed. The default (and recommended value) is \code{T}.
 #'
-#' @return A list \item{Post.Theta}{\code{p} x 2 matrix containing the posterior expectations of the scale and location parameters (a,y0) for each metabolite. Returns \code{NA} for metabolites without a missingness mechansim.} \item{Post.Var}{A list of \code{p} 2x2 matrices containing the posterior variances for (a,y0) for each metabolite.} \item{Post.W}{A \code{p}x\code{n} containing the posterior expectations of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.VarW}{A \code{p}x\code{n} containing the posterior variances of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.Pi}{A \code{p}x\code{n} containing the posterior expectations of P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Pi.MAR}{A \code{p}x\code{n} containing estimate of P(Metab is observed | Latent covariates). This helps stabilize the inverse probability weights in downstream estimation.} \item{Theta.Miss}{\code{p} x 2 matrix with the estimates of the unshrunk GMM scale and location parameters a, y0 for each metabolite's missingness mechanism. If a missingness mechansism was not estimated, returns \code{NA}.} \item{Pvalue.value}{The J-test P-value that tests the null hypothesis H_0: Missingness mechanism is correct} \item{Ind.Confident}{A logical \code{p}-vector containing the indices of metabolites whose missingness mechanisms we are confident in.} \item{Emp.Bayes.loga}{Empirical Bayes estimate of E(log(a))} \item{Emp.Bayes.y0}{Empirical Bayes estimate of E(y0)}
+#' @return A list that should be save immediately. It can be used directly as input into CC.Missing to estimate latent factors and the coefficients of interest in a multivariate linear model. \item{Post.Theta}{\code{p} x 2 matrix containing the posterior expectations of the scale and location parameters (a,y0) for each metabolite. Returns \code{NA} for metabolites without a missingness mechansim.} \item{Post.Var}{A list of \code{p} 2x2 matrices containing the posterior variances for (a,y0) for each metabolite.} \item{Post.W}{A \code{p}x\code{n} containing the posterior expectations of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.VarW}{A \code{p}x\code{n} containing the posterior variances of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.Pi}{A \code{p}x\code{n} containing the posterior expectations of P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Pi.MAR}{A \code{p}x\code{n} containing estimate of P(Metab is observed | Latent covariates). This helps stabilize the inverse probability weights in downstream estimation.} \item{Theta.Miss}{\code{p} x 2 matrix with the estimates of the unshrunk GMM scale and location parameters a, y0 for each metabolite's missingness mechanism. If a missingness mechansism was not estimated, returns \code{NA}.} \item{Pvalue.value}{The J-test P-value that tests the null hypothesis H_0: Missingness mechanism is correct} \item{Ind.Confident}{A logical \code{p}-vector containing the indices of metabolites whose missingness mechanisms we are confident in.} \item{Emp.Bayes.loga}{Empirical Bayes estimate of E(log(a))} \item{Emp.Bayes.y0}{Empirical Bayes estimate of E(y0)}
 #'
 #' @export
-EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.miss.C = 0.05, max.iter.C = 400, n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a=0.1, max.a=7, min.y0=10, max.y0=30, t.df=4, p.min.1=0, p.min.2=0, n.boot.J=150, Model.Pvalue=T, BH.analyze.min=0.2, min.quant.5=5, shrink.Est=T, prop.y0.sd = 0.2, prop.a.sd = 0.2, n.iter.MCMC = 2e4, n.burn.MCMC = 1e3, min.prob.MCMC = 1/n, Bayes.est = c("FullBayes", "FullBayes_ind", "EmpBayes"), simple.average.EB=F) {
+EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.miss.C = 0.05, n_cores=NULL, max.iter.C = 400, n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a=0.1, max.a=7, min.y0=10, max.y0=30, t.df=4, p.min.1=0, p.min.2=0, n.boot.J=150, Model.Pvalue=T, BH.analyze.min=0.2, min.quant.5=5, shrink.Est=T, prop.y0.sd = 0.2, prop.a.sd = 0.2, n.iter.MCMC = 2e4, n.burn.MCMC = 1e3, min.prob.MCMC = 1/n, Bayes.est = c("EmpBayes", "FullBayes", "FullBayes_ind"), simple.average.EB=F) {
   p <- nrow(Y)
   n <- ncol(Y)
   Prob.Missing <- apply(X = Y, MARGIN = 1, function(x) {mean(is.na(x))})
@@ -95,7 +96,7 @@ EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.m
   
   
   ###Estimate missingness mechanism parameters with GMM###
-  n_cores <- max(detectCores() - 1, 1)
+  if (is.null(n_cores)) {n_cores <- max(detectCores() - 1, 1)}
   cat(paste("Estimating missingness mechanism using", n_cores, "cores..."))
   out$Theta.Miss <- matrix(NA, nrow=p, ncol=2)
   out$Theta.MAR <- matrix(NA, nrow=p, ncol=n.K.GMM+1)
@@ -109,8 +110,9 @@ EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.m
   
   cl <- makeCluster(n_cores)
   clusterExport(cl = cl, c("Model.Pvalue", "min.a", "max.a", "min.y0", "max.y0", "C", "n.K.GMM", "t.df", "p.min.1", "p.min.2", "n.boot.J"), envir=environment())
-  clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")
-                                source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/BayesianGMM.R")})
+  #clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")
+  #                              source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/BayesianGMM.R")})
+  clusterEvalQ(cl = cl, expr = {library(MetabMiss)})
   out.tmp <- parLapply( cl = cl, X = lapply(ind.missing, function(g){return(list(y=Y[g,], t.stat=Qvalues[g,], q=Qvalues[g,]))}), function(ll){
     out.par <- list()
     y.g <- ll$y
@@ -178,7 +180,7 @@ EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.m
   
   ###Empirical Bayes to estimate prior for a and y0 and then MCMC to get posterior expectations and variances###
   if (shrink.Est) {
-    Bayes.est <- match.arg(Bayes.est, choices = c("FullBayes", "FullBayes_ind", "EmpBayes"))
+    Bayes.est <- match.arg(Bayes.est, choices = c("EmpBayes", "FullBayes", "FullBayes_ind"))
     out$Bayes.est <- Bayes.est
     
     #Empirical Bayes#
@@ -221,12 +223,13 @@ EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.m
     
     if (Bayes.est == "EmpBayes") {
       #MCMC with covariance term = 0#
-      n_cores <- max(detectCores() - 1, 1)
+      if (is.null(n_cores)) {n_cores <- max(detectCores() - 1, 1)}
       cat(paste("MCMC using", n_cores, "cores..."))
       cl <- makeCluster(n_cores)
       clusterExport(cl = cl, c("C", "t.df", "p.min.1", "p.min.2", "Emp.Bayes.both", "prop.y0.sd", "prop.a.sd", "n.iter.MCMC", "n.burn.MCMC", "min.prob.MCMC"), envir=environment())
-      clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")
-        source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/BayesianGMM.R")})
+      #clusterEvalQ(cl = cl, expr = {source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/EstimateMissingnessGMM_t.R")
+      #  source("/Users/Chris/Desktop/Uchicago/Nicolae/GitWork/COPSAC_Metabolite/R/BayesianGMM.R")})
+      clusterEvalQ(cl = cl, expr = {library(MetabMiss)})
       out.MCMC <- parLapply(cl = cl, X = lapply(which(ind.q.MCMC==T),function(g){return(list(K.ind=out$K.mat[g,], y=Y[g,], y0=out$Theta.Miss[g,2], a=out$Theta.Miss[g,1]))}), function(ll) {
         out.Bayes.g <- Bayes.GMM(y = ll$y, C = C, K.ind = ll$K.ind, p.min.1 = p.min.1, p.min.2 = p.min.2, t.df = t.df, y0.mean = Emp.Bayes.both$mu[2], log.a.mean = Emp.Bayes.both$mu[1], V = diag(diag(Emp.Bayes.both$V)), y0.start = ll$y0, a.start = ll$a, prop.y0.sd = prop.y0.sd, prop.a.sd = prop.a.sd, n.iter = n.iter.MCMC, n.burn = n.burn.MCMC, save.every = 0, include.norm = T, min.prob = min.prob.MCMC)
         return(list( theta=out.Bayes.g$Post.Exp, Var=out.Bayes.g$Post.Var, W=out.Bayes.g$Post.Exp.W, Pi=out.Bayes.g$Post.Exp.Pi, Var.W=out.Bayes.g$Post.Var.W ))
@@ -430,6 +433,16 @@ my.OLS <- function(y, X, d.add = 0) {
 #' Choose the number of potential instruments
 
 #' Choose the number of potential instruments using a q-value threshold
+#' 
+#' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
+#' @param Cov a \code{n} x \code{d} matrix of covariates, where d <= 2. The default, and recommended value, is the vector of all 1s.
+#' @param max.miss.C a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have to be considered nearly completely observed. The default is 0.05.
+#' @param max.missing.consider a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have. Any metabolites with missingness fractions greater than this will be ignored. Defaults to 0.5.
+#' @param K.max an integer >=2. The maximum number of potential instruments to consider. If unspecified, it is set to be sva::num.sv estimate for K applied to the metabolites with complete data.
+#' @param q.thresh a vector of numbers between 0 and 1. The q-value thresholds to consider. It defaults to c(0.01, 0.05, 0.1).
+#' 
+#' @return a list. \item{Frac1}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least one factor 1,...,k with q-value less than or equal to \code{q.thresh[j]}.} \item{Frac2}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least two factors 1,...,k with q-value less than or equal to \code{q.thresh[j]}. It is returned only if \code{d = 1}}
+#' 
 #' @export
 Num.Instruments <- function(Y, Cov=NULL, max.miss.C = 0.05, max.missing.consider=0.5, K.max=NULL, q.thresh=c(0.01, 0.05, 0.1)) {
   p <- nrow(Y)

@@ -5,14 +5,14 @@
 \title{Estimate the metabolite-dependent missingness mechanisms}
 \usage{
 EstimateMissing(Y, K = 10, max.missing.consider = 0.5, Cov = NULL,
-  max.miss.C = 0.05, max.iter.C = 400, n.repeat.Sigma.C = 1,
-  n.K.GMM = 2, min.a = 0.1, max.a = 7, min.y0 = 10, max.y0 = 30,
-  t.df = 4, p.min.1 = 0, p.min.2 = 0, n.boot.J = 150,
-  Model.Pvalue = T, BH.analyze.min = 0.2, min.quant.5 = 5,
-  shrink.Est = T, prop.y0.sd = 0.2, prop.a.sd = 0.2,
-  n.iter.MCMC = 20000, n.burn.MCMC = 1000, min.prob.MCMC = 1/n,
-  Bayes.est = c("FullBayes", "FullBayes_ind", "EmpBayes"),
-  simple.average.EB = F)
+  max.miss.C = 0.05, n_cores = NULL, max.iter.C = 400,
+  n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a = 0.1, max.a = 7,
+  min.y0 = 10, max.y0 = 30, t.df = 4, p.min.1 = 0, p.min.2 = 0,
+  n.boot.J = 150, Model.Pvalue = T, BH.analyze.min = 0.2,
+  min.quant.5 = 5, shrink.Est = T, prop.y0.sd = 0.2,
+  prop.a.sd = 0.2, n.iter.MCMC = 20000, n.burn.MCMC = 1000,
+  min.prob.MCMC = 1/n, Bayes.est = c("EmpBayes", "FullBayes",
+  "FullBayes_ind"), simple.average.EB = F)
 }
 \arguments{
 \item{Y}{a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.}
@@ -25,6 +25,8 @@ EstimateMissing(Y, K = 10, max.missing.consider = 0.5, Cov = NULL,
 
 \item{max.miss.C}{Maximum fraction of missing data a metabolite can have to ignore the missingness mechanism in downstream estimation and inference. The default is 0.05.}
 
+\item{n_cores}{The number of cores to use. The default is the number of maximum number of usable cores - 1.}
+
 \item{max.iter.C}{Maximum number of iterations to estimate the latent covariates C. Default is 400 and should not be changed.}
 
 \item{n.K.GMM}{Number of additional terms (besides the intercept) to be considered in GMM when estimating the missingness mechanism. The default (and recommendend value) is 2. If changed, this must be >= 2}
@@ -36,7 +38,7 @@ EstimateMissing(Y, K = 10, max.missing.consider = 0.5, Cov = NULL,
 \item{Model.Pvalue}{A logical value. If \code{T}, a missingness model P-value is computed. The default (and recommended value) is \code{T}.}
 }
 \value{
-A list \item{Post.Theta}{\code{p} x 2 matrix containing the posterior expectations of the scale and location parameters (a,y0) for each metabolite. Returns \code{NA} for metabolites without a missingness mechansim.} \item{Post.Var}{A list of \code{p} 2x2 matrices containing the posterior variances for (a,y0) for each metabolite.} \item{Post.W}{A \code{p}x\code{n} containing the posterior expectations of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.VarW}{A \code{p}x\code{n} containing the posterior variances of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.Pi}{A \code{p}x\code{n} containing the posterior expectations of P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Pi.MAR}{A \code{p}x\code{n} containing estimate of P(Metab is observed | Latent covariates). This helps stabilize the inverse probability weights in downstream estimation.} \item{Theta.Miss}{\code{p} x 2 matrix with the estimates of the unshrunk GMM scale and location parameters a, y0 for each metabolite's missingness mechanism. If a missingness mechansism was not estimated, returns \code{NA}.} \item{Pvalue.value}{The J-test P-value that tests the null hypothesis H_0: Missingness mechanism is correct} \item{Ind.Confident}{A logical \code{p}-vector containing the indices of metabolites whose missingness mechanisms we are confident in.} \item{Emp.Bayes.loga}{Empirical Bayes estimate of E(log(a))} \item{Emp.Bayes.y0}{Empirical Bayes estimate of E(y0)}
+A list that should be save immediately. It can be used directly as input into CC.Missing to estimate latent factors and the coefficients of interest in a multivariate linear model. \item{Post.Theta}{\code{p} x 2 matrix containing the posterior expectations of the scale and location parameters (a,y0) for each metabolite. Returns \code{NA} for metabolites without a missingness mechansim.} \item{Post.Var}{A list of \code{p} 2x2 matrices containing the posterior variances for (a,y0) for each metabolite.} \item{Post.W}{A \code{p}x\code{n} containing the posterior expectations of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.VarW}{A \code{p}x\code{n} containing the posterior variances of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.Pi}{A \code{p}x\code{n} containing the posterior expectations of P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Pi.MAR}{A \code{p}x\code{n} containing estimate of P(Metab is observed | Latent covariates). This helps stabilize the inverse probability weights in downstream estimation.} \item{Theta.Miss}{\code{p} x 2 matrix with the estimates of the unshrunk GMM scale and location parameters a, y0 for each metabolite's missingness mechanism. If a missingness mechansism was not estimated, returns \code{NA}.} \item{Pvalue.value}{The J-test P-value that tests the null hypothesis H_0: Missingness mechanism is correct} \item{Ind.Confident}{A logical \code{p}-vector containing the indices of metabolites whose missingness mechanisms we are confident in.} \item{Emp.Bayes.loga}{Empirical Bayes estimate of E(log(a))} \item{Emp.Bayes.y0}{Empirical Bayes estimate of E(y0)}
 }
 \description{
 Estimate the metabolite-dependent missingness mechanisms with a hierarchical generalized method of moments (GMM). This function only has to be run once per metabolite dataset and the output should be stored with the metabolite data. The user need only specify \code{Y} and maybe \code{K}, although the default \code{K = 10} should suffice.
