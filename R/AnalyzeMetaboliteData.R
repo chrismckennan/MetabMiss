@@ -7,18 +7,18 @@ library(sva)
 #' Estimate the metabolite-dependent missingness mechanisms with a hierarchical generalized method of moments (GMM). This function only has to be run once per metabolite dataset and the output should be stored with the metabolite data. The user need only specify \code{Y} and maybe \code{K}, although the default \code{K = 10} should suffice.
 #' 
 #' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
-#' @param K a number >= 2. This gives the number of latent covariates to use to estimate the missingness mechanism. We recommend the user use sva::num.sv on the metabolites with no missing data to get an upper bound for this number. We recommend using anything between 5 and 10. The default is 10
+#' @param K a number >= 2. This gives the number of latent covariates to use to estimate the missingness mechanism. We recommend using \code{Num.Instruments} to estimate it. The default is 10. \code{K} and \code{Y} are the only variables that must be specified.
 #' @param n_cores The number of cores to use. The default is the number of maximum number of usable cores - 1.
-#' @param max.missing.consider The maximum fraction of missing data a metabolite is allowed to have. Missingness mechanisms will NOT be estimated for metabolites with more missing data than this. Default is 0.5
-#' @param max.miss.C Maximum fraction of missing data a metabolite can have to ignore the missingness mechanism in downstream estimation and inference. The default is 0.05.
+#' @param max.missing.consider The maximum fraction of missing data a metabolite is allowed to have. Missingness mechanisms will NOT be estimated for metabolites with more missing data than this. Default, and recommended value, is 0.5
+#' @param max.miss.C Maximum fraction of missing data a metabolite can have to ignore the missingness mechanism in downstream estimation and inference. The default, and recommended value, is 0.05.
 #' @param max.iter.C Maximum number of iterations to estimate the latent covariates C. Default is 400 and should not be changed.
-#' @param t.df The missingness mechanism is the CDF of a scaled and cetered T-distribution with t.df degrees of freedom. The default (and recommended value) is 4
+#' @param t.df The missingness mechanism is the CDF of a scaled and cetered T-distribution with t.df degrees of freedom. The default, and recommended value, is 4
 #' @param n.boot.J The number of bootstrap samples to compute the J-statistics. The defualt is 150.
 #' @param Cov An optional n x d matrix of covariates. It is recommended the user not specify anything other than the intercept. The default is the intercept.
-#' @param n.K.GMM Number of additional terms (besides the intercept) to be considered in GMM when estimating the missingness mechanism. The default (and recommendend value) is 2. If changed, this must be >= 2
-#' @param Model.Pvalue A logical value. If \code{T}, a missingness model P-value is computed. The default (and recommended value) is \code{T}.
+#' @param n.K.GMM Number of additional terms (besides the intercept) to be considered in GMM when estimating the missingness mechanism. The default, and recommendend value, is 2. If changed, this must be >= 2
+#' @param Model.Pvalue A logical value. If \code{T}, a missingness model P-value is computed. The default, and recommended value, is \code{T}.
 #'
-#' @return A list that should be save immediately. It can be used directly as input into CC.Missing to estimate latent factors and the coefficients of interest in a multivariate linear model. \item{Post.Theta}{\code{p} x 2 matrix containing the posterior expectations of the scale and location parameters (a,y0) for each metabolite. Returns \code{NA} for metabolites without a missingness mechansim.} \item{Post.Var}{A list of \code{p} 2x2 matrices containing the posterior variances for (a,y0) for each metabolite.} \item{Post.W}{A \code{p}x\code{n} containing the posterior expectations of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.VarW}{A \code{p}x\code{n} containing the posterior variances of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.Pi}{A \code{p}x\code{n} containing the posterior expectations of P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Pi.MAR}{A \code{p}x\code{n} containing estimate of P(Metab is observed | Latent covariates). This helps stabilize the inverse probability weights in downstream estimation.} \item{Theta.Miss}{\code{p} x 2 matrix with the estimates of the unshrunk GMM scale and location parameters a, y0 for each metabolite's missingness mechanism. If a missingness mechansism was not estimated, returns \code{NA}.} \item{Pvalue.value}{The J-test P-value that tests the null hypothesis H_0: Missingness mechanism is correct} \item{Ind.Confident}{A logical \code{p}-vector containing the indices of metabolites whose missingness mechanisms we are confident in.} \item{Emp.Bayes.loga}{Empirical Bayes estimate of E(log(a))} \item{Emp.Bayes.y0}{Empirical Bayes estimate of E(y0)}
+#' @return A list that should be save immediately. It can be used directly as input into CC.Missing to estimate latent factors and the coefficients of interest in a multivariate linear model. \item{Post.Theta}{\code{p} x 2 matrix containing the posterior expectations of the missingness scale and location parameters (a,y0) for each metabolite. Returns \code{NA} for metabolites without a missingness mechansim.} \item{Post.Var}{A list of \code{p} 2x2 matrices containing the posterior variances for (a,y0) for each metabolite.} \item{Post.W}{A \code{p}x\code{n} containing the posterior expectations of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.VarW}{A \code{p}x\code{n} containing the posterior variances of 1/P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Post.Pi}{A \code{p}x\code{n} containing the posterior expectations of P(Metab is observed | y, a, y0), where the expectation is taken with respect to (a,y0) | y} \item{Pi.MAR}{A \code{p}x\code{n} containing estimate of P(Metab is observed | Latent covariates). This helps stabilize the inverse probability weights in downstream estimation.} \item{Theta.Miss}{\code{p} x 2 matrix with the estimates of the unshrunk GMM scale and location parameters a, y0 for each metabolite's missingness mechanism. If a missingness mechansism was not estimated, returns \code{NA}.} \item{Pvalue.value}{The J-test P-value that tests the null hypothesis H_0: Missingness mechanism is correct} \item{Ind.Confident}{A logical \code{p}-vector containing the indices of metabolites whose missingness mechanisms we are confident in.} \item{Emp.Bayes.loga}{Empirical Bayes estimate of E(log(a))} \item{Emp.Bayes.y0}{Empirical Bayes estimate of E(y0)}
 #'
 #' @export
 EstimateMissing <- function(Y, K=10, max.missing.consider=0.5, Cov = NULL, max.miss.C = 0.05, n_cores=NULL, max.iter.C = 400, n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a=0.1, max.a=7, min.y0=10, max.y0=30, t.df=4, p.min.1=0, p.min.2=0, n.boot.J=150, Model.Pvalue=T, BH.analyze.min=0.2, min.quant.5=5, shrink.Est=T, prop.y0.sd = 0.2, prop.a.sd = 0.2, n.iter.MCMC = 2e4, n.burn.MCMC = 1e3, min.prob.MCMC = 1/n, Bayes.est = c("EmpBayes", "FullBayes", "FullBayes_ind"), simple.average.EB=F) {
@@ -430,21 +430,23 @@ my.OLS <- function(y, X, d.add = 0) {
 
 ######Choose the number of potential instruments######
 
-#' Choose the number of potential instruments
-
+#' Choose the number of potential instruments. This is \code{K} in the function \code{EstimateMissing}.
+#'
 #' Choose the number of potential instruments using a q-value threshold
 #' 
-#' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
+#' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}. This is the only variable that must be specified.
 #' @param Cov a \code{n} x \code{d} matrix of covariates, where d <= 2. The default, and recommended value, is the vector of all 1s.
-#' @param max.miss.C a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have to be considered nearly completely observed. The default is 0.05.
-#' @param max.missing.consider a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have. Any metabolites with missingness fractions greater than this will be ignored. Defaults to 0.5.
+#' @param max.miss.C a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have to be considered nearly completely observed. The default, and recommended value, is 0.05.
+#' @param max.missing.consider a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have. Any metabolites with missingness fractions greater than this will be ignored. Default, and recommended value, is 0.5.
 #' @param K.max an integer >=2. The maximum number of potential instruments to consider. If unspecified, it is set to be sva::num.sv estimate for K applied to the metabolites with complete data.
 #' @param q.thresh a vector of numbers between 0 and 1. The q-value thresholds to consider. It defaults to c(0.01, 0.05, 0.1).
 #' 
-#' @return a list. \item{Frac1}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least one factor 1,...,k with q-value less than or equal to \code{q.thresh[j]}.} \item{Frac2}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least two factors 1,...,k with q-value less than or equal to \code{q.thresh[j]}. It is returned only if \code{d = 1}}
+#' @return a list. \item{Frac1}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least one factor 1,...,k with q-value less than or equal to \code{q.thresh[j]}.} \item{Frac2}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least two factors 1,...,k with q-value less than or equal to \code{q.thresh[j]}. It is returned only if \code{d = 1}} \item{frac.thresh}{The fraction of factors with q-value < 0.05. If this is < 0.75, we recommend not estimating the missingness mechanism.} \item{K.recommended}{The recommended K (a scalar). This can be used as \code{K} in the function \code{EstimateMissing}. This is the smallest number of factors such that \code{frac.thresh} of the metabolites with missing data have at least 1 factor with q-value < 0.05.}
 #' 
 #' @export
 Num.Instruments <- function(Y, Cov=NULL, max.miss.C = 0.05, max.missing.consider=0.5, K.max=NULL, q.thresh=c(0.01, 0.05, 0.1)) {
+  q.recommended <- 0.05
+  min.thresh <- 0.9
   p <- nrow(Y)
   n <- ncol(Y)
   if (is.null(Cov)) {Cov <- rep(1,n)}
@@ -452,6 +454,7 @@ Num.Instruments <- function(Y, Cov=NULL, max.miss.C = 0.05, max.missing.consider
   Frac.Missing <- rowMeans(is.na(Y))
   if (is.null(K.max)) {K.max <- sva::num.sv(dat = Y[Frac.Missing==0,], mod = Cov)}
   N1.thresh <- matrix(NA, nrow=K.max, ncol=length(q.thresh))
+  N1.recommended <- rep(NA, K.max)
   if (d == 1) {N2.thresh <- matrix(NA, nrow=K.max, ncol=length(q.thresh))}
   
   max.H1 <- 0.5  #Maximum p-value to be considered H1. To be used if q-value fails
@@ -480,6 +483,7 @@ Num.Instruments <- function(Y, Cov=NULL, max.miss.C = 0.05, max.missing.consider
     for (j in 1:length(q.thresh)) {
       N1.thresh[K,j] <- sum(Min.Q.K <= q.thresh[j], na.rm = T) / length(ind.missing)
     }
+    N1.recommended[K] <- sum(Min.Q.K <= q.recommended, na.rm = T) / length(ind.missing)
     if (d == 1) {
       Min2.Q.K <- apply(X = Q.K, MARGIN = 1, function(x){sort(x)[2]})
       for (j in 1:length(q.thresh)) {
@@ -488,13 +492,20 @@ Num.Instruments <- function(Y, Cov=NULL, max.miss.C = 0.05, max.missing.consider
     }
     cat("done\n")
   }
+  tmp.recommend <- which(N1.recommended >= min.thresh)
+  while (length(tmp.recommend) == 0 && min.thresh > 0) {
+    min.thresh <- max(0, min.thresh - 0.05)
+    tmp.recommend <- which(N1.recommended >= min.thresh)
+  }
+  K.recommended <- max(2, min(tmp.recommend))
+  
   rownames(N1.thresh) <- 1:K.max
   colnames(N1.thresh) <- q.thresh
   if (d == 1) {
     rownames(N2.thresh) <- 1:K.max
     colnames(N2.thresh) <- q.thresh
-    return(list(Frac1=N1.thresh, Frac2=N2.thresh))
+    return(list(Frac1=N1.thresh, Frac2=N2.thresh, K.recommended=K.recommended, frac.thresh=min.thresh))
   }
-  return(list(Frac1=N1.thresh))
+  return(list(Frac1=N1.thresh, K.recommended=K.recommended, frac.thresh=min.thresh))
 }
 

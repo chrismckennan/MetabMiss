@@ -7,13 +7,13 @@ library(qvalue)
 #'
 #' Estimate latent covariates and estimate/do inference on the coefficients of interest in a multivariate linear model with stabilized inverse probability weighting (sIPW) using estimated missingness mechansim.
 #'
-#' @param Y a \code{p} x \code{n} data matrix of log-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
+#' @param Y a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.
 #' @param X a \code{n} x \code{d} matrix of covariates of interest (i.e. disease status).
 #' @param Z a \code{n} x \code{r} matrix of observed nuisance covariates (i.e. the intercept, observed technical factors, etc.)
-#' @param K The number of latent covariates (i.e. C is a \code{n} x \code{K} matrix). If null, it is estimated using sva::num.sv applied to the metabolites with complete data.
+#' @param K The number of latent covariates (i.e. C is a \code{n} x \code{K} matrix). If unspecified, it is estimated using sva::num.sv applied to the metabolites with complete data.
 #' @param Miss.Mech The missingness mechansim object returned by \code{EstimateMissing}.
 #' @param ind.samples A logical or numeric vector of samples to be considered in the analysis. For example, if disease status were only measured in a subset of the patients, this would be the samples with a recorded disease status. Default is no missing samples.
-#' @param est.Beta A logical indicating whether or not to estimate/do inference on coefficients of interest. If \code{F}, only the latent covariates are estimated. Defaults to \code{T}.
+#' @param est.Beta A logical indicating whether or not to estimate/do inference on coefficients of interest. If \code{F}, only the latent covariates are estimated. Default, and recommended value, is \code{T}.
 #' @param max.miss.perp Maximum fraction of missing data a metabolite is allowed to have to be used to calculate the part of C perpendicular to X. Defaults to 0.5.
 #' @param max.miss.image Maximum fraction of missing data a metabolite is allowed to have to be used to calculate the part of C in the image of X. Defaults to 0.5.
 #' 

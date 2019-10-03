@@ -2,30 +2,28 @@
 % Please edit documentation in R/AnalyzeMetaboliteData.R
 \name{Num.Instruments}
 \alias{Num.Instruments}
-\title{Choose the number of potential instruments
-Choose the number of potential instruments using a q-value threshold}
+\title{Choose the number of potential instruments. This is \code{K} in the function \code{EstimateMissing}.}
 \usage{
 Num.Instruments(Y, Cov = NULL, max.miss.C = 0.05,
   max.missing.consider = 0.5, K.max = NULL, q.thresh = c(0.01, 0.05,
   0.1))
 }
 \arguments{
-\item{Y}{a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.}
+\item{Y}{a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}. This is the only variable that must be specified.}
 
 \item{Cov}{a \code{n} x \code{d} matrix of covariates, where d <= 2. The default, and recommended value, is the vector of all 1s.}
 
-\item{max.miss.C}{a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have to be considered nearly completely observed. The default is 0.05.}
+\item{max.miss.C}{a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have to be considered nearly completely observed. The default, and recommended value, is 0.05.}
 
-\item{max.missing.consider}{a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have. Any metabolites with missingness fractions greater than this will be ignored. Defaults to 0.5.}
+\item{max.missing.consider}{a number between 0 and 1. The maximum fraction of missing data a metabolite is allowed to have. Any metabolites with missingness fractions greater than this will be ignored. Default, and recommended value, is 0.5.}
 
 \item{K.max}{an integer >=2. The maximum number of potential instruments to consider. If unspecified, it is set to be sva::num.sv estimate for K applied to the metabolites with complete data.}
 
 \item{q.thresh}{a vector of numbers between 0 and 1. The q-value thresholds to consider. It defaults to c(0.01, 0.05, 0.1).}
 }
 \value{
-a list. \item{Frac1}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least one factor 1,...,k with q-value less than or equal to \code{q.thresh[j]}.} \item{Frac2}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least two factors 1,...,k with q-value less than or equal to \code{q.thresh[j]}. It is returned only if \code{d = 1}}
+a list. \item{Frac1}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least one factor 1,...,k with q-value less than or equal to \code{q.thresh[j]}.} \item{Frac2}{a \code{K.max} x \code{length(q.thresh)} matrix. The (k,j)th entry is the fraction of metabolites with at least two factors 1,...,k with q-value less than or equal to \code{q.thresh[j]}. It is returned only if \code{d = 1}} \item{frac.thresh}{The fraction of factors with q-value < 0.05. If this is < 0.75, we recommend not estimating the missingness mechanism.} \item{K.recommended}{The recommended K (a scalar). This can be used as \code{K} in the function \code{EstimateMissing}. This is the smallest number of factors such that \code{frac.thresh} of the metabolites with missing data have at least 1 factor with q-value < 0.05.}
 }
 \description{
-Choose the number of potential instruments
 Choose the number of potential instruments using a q-value threshold
 }
