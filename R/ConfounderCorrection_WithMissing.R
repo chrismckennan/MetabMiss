@@ -20,7 +20,7 @@ library(qvalue)
 #' @return A list \item{C.iter}{The estimate of the \code{n} x \code{K} matrix of latent covariates.} \item{Beta.iter}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest.} \item{p.t.iter}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest.} \item{Var.beta.iter}{A length \code{p} list of the \code{d} x \code{d} estimates for Var(Beta.iter)} \item{t.iter}{A \code{p} x \code{d} matrix of t-statistics, defined as Beta.iter/SE(Beta.iter)} \item{p.f.iter}{A length \code{p} vector of F-statistic p-values for the null hypothesis that X has no effect on metabolite intensity. It is only returned if \code{d} > 1.} \item{L}{The estimate of the \code{p} x \code{K} matrix of coefficients for the latent covariates.} \item{Beta.naive}{The estimate of the \code{p} x \code{d} matrix of coefficients of interest that ignores C. This should ONLY be used for comparison.} \item{p.t.naive}{The \code{p} x \code{d} matrix of p-values for the coefficients of interest that ignore C. This should ONLY be used for comparison.}
 #'
 #' @export
-CC.Missing <- function(Y, X, Z=NULL, K=NULL, Miss.Mech, ind.samples=NULL, max.miss.perp=0.5, max.miss.image=0.5, BH.min=NULL, method = c("sIPW", "IPW"), include.updates=T, est.Beta=T, refine.C=F, p.refine.both=F, return.all=F) {
+CC.Missing <- function(Y, X, Z=NULL, K=NULL, Miss.Mech, ind.samples=NULL, max.miss.perp=0.5, max.miss.image=0.5, BH.min=NULL, method = c("sIPW", "IPW"), include.updates=T, est.Beta=T, return.nuis=F, refine.C=F, p.refine.both=F, return.all=F, return.mu=F) {
   method <- match.arg(method, c("sIPW", "IPW"))
   max.miss.C <- Miss.Mech$max.miss.C
   X <- cbind(X); Z <- cbind(Z)
@@ -213,14 +213,21 @@ CC.Missing <- function(Y, X, Z=NULL, K=NULL, Miss.Mech, ind.samples=NULL, max.mi
   }
   
   ####Iterative estimate for Omega####
-  out.tmp <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$C.iter,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C)
+  out.tmp <- Estimation.IPW(Y = Y, Cov = cbind(out$X,out$C.iter,out$Z), Weights = Weights, Var.Weights = Var.Weights, max.miss.C = max.miss.C, ind.int = 1:d, ind.analyze = ind.miss.all | Prob.Missing <= max.miss.C, return.mu=return.mu, return.nuis=return.nuis)
   out$t.iter <- out.tmp$t
   out$p.t.iter <- out.tmp$p.t
   out$f.iter <- out.tmp$f
   out$p.f.iter <- out.tmp$p.f
-  out$Beta.iter <- out.tmp$Beta
+  if (return.nuis) {
+    out$Beta.iter <- out.tmp$Beta[,1:d]
+    out$L.iter <- out.tmp$Beta[,(d+1):(d+K)]
+    if (!is.null(out$Z)) {out$Nuis.iter <- out.tmp$Beta[,(d+K+1):ncol(cbind(out$X,out$C.iter,out$Z))]}
+  } else {
+    out$Beta.iter <- out.tmp$Beta
+  }
   out$Var.beta.iter <- out.tmp$Var.beta  
   out$Sigma.iter <- out.tmp$Sigma
+  if (return.mu) {out$Mu <- out.tmp$Mu}
   
   ######Inflated estimate for Omega######
   if (return.all) {
@@ -316,11 +323,11 @@ Est.Cperp.Weights <- function(Y, Cov=NULL, C.start, Weights, ind.use.miss, max.m
 
 ######Estimation with IPW######
 
-Estimation.IPW <- function(Y=Y, Cov=Cov, Weights, Var.Weights, max.miss.C=0.05, ind.int=NULL, ind.analyze) {
+Estimation.IPW <- function(Y=Y, Cov=Cov, Weights, Var.Weights, max.miss.C=0.05, ind.int=NULL, ind.analyze, return.mu=F, return.nuis=F) {
   n <- ncol(Y)
   p <- nrow(Y)
   r <- ncol(Cov)
-  if (is.null(ind.int)) {ind.int <- 1:r}
+  if (is.null(ind.int) || return.nuis) {ind.int <- 1:r}
   out <- list()
   
   Prob.Missing <- apply(X = Y, MARGIN = 1, function(x) {mean(is.na(x))})
@@ -329,12 +336,13 @@ Estimation.IPW <- function(Y=Y, Cov=Cov, Weights, Var.Weights, max.miss.C=0.05, 
   Var.list <- vector(mode = "list", length = p)   #Array of variance matrices
   Var.naive.list <- vector(mode = "list", length = p)
   out$Sigma <- rep(NA, p)
+  if (return.mu) {out$Mu <- matrix(NA, nrow=p, ncol=n)}
   
   #Missing at random#
   ind.mar <- Prob.Missing <= max.miss.C
   tmp.mar <- lapply(X = which(ind.mar==T), function(g){ ind.obs <- !is.na(Y[g,])
           y <- Y[g,ind.obs]
-          cov.tmp <- Cov[ind.obs,]
+          cov.tmp <- cbind(Cov[ind.obs,])
           hess <- solve(t(cov.tmp)%*%cov.tmp)
           tt <- list(); tt$coef <- hess%*%t(cov.tmp)%*%y
           tt$sigma2 <- 1/(length(y)-ncol(cov.tmp))*sum((y-cov.tmp%*%tt$coef)^2)
@@ -345,6 +353,7 @@ Estimation.IPW <- function(Y=Y, Cov=Cov, Weights, Var.Weights, max.miss.C=0.05, 
   Var.list[ind.mar] <- lapply(tmp.mar, function(x){x$var})
   Var.naive.list[ind.mar] <- Var.list[ind.mar]
   out$Sigma[ind.mar] <- unlist(lapply(tmp.mar, function(x){x$sigma2}))
+  if (return.mu) {out$Mu[ind.mar,] <- Beta[ind.mar,]%*%t(Cov)}
   
   #Missing not at random#
   ind.nmar <- Prob.Missing > max.miss.C & ind.analyze
@@ -357,6 +366,7 @@ Estimation.IPW <- function(Y=Y, Cov=Cov, Weights, Var.Weights, max.miss.C=0.05, 
                   cov.tmp <- cbind(Cov[ind.obs,])
                   hess <- solve(t(cov.tmp*w)%*%cov.tmp); hess.naive <- solve(t(cov.tmp)%*%cov.tmp)
                   tt <- list(); tt$coef <- hess%*%t(cov.tmp*w)%*%y; tt$coef.naive <- hess.naive%*%t(cov.tmp)%*%y
+                  tt$mu <- 
                   resids.ipw <- y-as.vector(cov.tmp%*%tt$coef)
                   Score <- cov.tmp*resids.ipw
                   Score.naive <- cov.tmp*(y-as.vector(cov.tmp%*%tt$coef.naive))
@@ -374,6 +384,7 @@ Estimation.IPW <- function(Y=Y, Cov=Cov, Weights, Var.Weights, max.miss.C=0.05, 
     Var.list[ind.nmar] <- lapply(tmp.nmar,function(x){x$var.vc})
     Var.naive.list[ind.nmar] <- lapply(tmp.nmar,function(x){x$var.naive})
     out$Sigma[ind.nmar] <- unlist(lapply(tmp.nmar, function(x){x$sigma2}))
+    if (return.mu) {out$Mu[ind.nmar,] <- Beta[ind.nmar,]%*%t(Cov)}
   }
   
   

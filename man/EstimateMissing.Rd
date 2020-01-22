@@ -4,15 +4,36 @@
 \alias{EstimateMissing}
 \title{Estimate the metabolite-dependent missingness mechanisms}
 \usage{
-EstimateMissing(Y, K = 10, max.missing.consider = 0.5, Cov = NULL,
-  max.miss.C = 0.05, n_cores = NULL, max.iter.C = 400,
-  n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a = 0.1, max.a = 7,
-  min.y0 = 10, max.y0 = 30, t.df = 4, p.min.1 = 0, p.min.2 = 0,
-  n.boot.J = 150, Model.Pvalue = T, BH.analyze.min = 0.2,
-  min.quant.5 = 5, shrink.Est = T, prop.y0.sd = 0.2,
-  prop.a.sd = 0.2, n.iter.MCMC = 20000, n.burn.MCMC = 1000,
-  min.prob.MCMC = 1/n, Bayes.est = c("EmpBayes", "FullBayes",
-  "FullBayes_ind"), simple.average.EB = F)
+EstimateMissing(
+  Y,
+  K = 10,
+  max.missing.consider = 0.5,
+  Cov = NULL,
+  max.miss.C = 0.05,
+  n_cores = NULL,
+  max.iter.C = 400,
+  n.repeat.Sigma.C = 1,
+  n.K.GMM = 2,
+  min.a = 0.1,
+  max.a = 7,
+  min.y0 = 10,
+  max.y0 = 30,
+  t.df = 4,
+  p.min.1 = 0,
+  p.min.2 = 0,
+  n.boot.J = 150,
+  Model.Pvalue = T,
+  BH.analyze.min = 0.2,
+  min.quant.5 = 5,
+  shrink.Est = T,
+  prop.y0.sd = 0.2,
+  prop.a.sd = 0.2,
+  n.iter.MCMC = 20000,
+  n.burn.MCMC = 1000,
+  min.prob.MCMC = 1/n,
+  Bayes.est = c("EmpBayes", "FullBayes", "FullBayes_ind"),
+  simple.average.EB = F
+)
 }
 \arguments{
 \item{Y}{a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}.}

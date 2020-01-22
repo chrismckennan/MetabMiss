@@ -4,9 +4,14 @@
 \alias{Num.Instruments}
 \title{Choose the number of potential instruments. This is \code{K} in the function \code{EstimateMissing}.}
 \usage{
-Num.Instruments(Y, Cov = NULL, max.miss.C = 0.05,
-  max.missing.consider = 0.5, K.max = NULL, q.thresh = c(0.01, 0.05,
-  0.1))
+Num.Instruments(
+  Y,
+  Cov = NULL,
+  max.miss.C = 0.05,
+  max.missing.consider = 0.5,
+  K.max = NULL,
+  q.thresh = c(0.01, 0.05, 0.1)
+)
 }
 \arguments{
 \item{Y}{a \code{p} x \code{n} data matrix of log2-transformed metabolite intensities, where \code{p} = #of metabolites and \code{n} = #of samples. Missing values should be left as \code{NA}. This is the only variable that must be specified.}
