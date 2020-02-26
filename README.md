@@ -1,5 +1,5 @@
 # MetabMiss
-Estimate and account for non-ignorable missingness mechanisms and latent confounders in metabolomic and proteomic data. The corresponding paper can be found here: https://arxiv.org/abs/1909.02644
+Estimate and account for non-ignorable missingness mechanisms and latent confounders in metabolomic and proteomic data. The corresponding paper can be found here: https://arxiv.org/abs/1909.02644, which has been accepted for publication in Annals of Applied Statistics.
 
 ## Installation
 First, make sure the packages "devtools", "parallel", "qvalue" and "sva" are installed. If not, the first two can be installed from CRAN and the second two can be installed from Bioconductor. To install MetabMiss, type the following into R:
@@ -26,3 +26,9 @@ The following instructions describe how to use these three functions to analyze 
 6.) If you change the variable of interest from step 4.), re-run 4.) and 5.) with the new covariates of interest/nuisance covariates. YOU ONLY HAVE TO RUN STEPS 2.) AND 3.) ONCE, AND DO NOT HAVE TO RE-RUN THEM WHEN THE COVARIATES OF INTEREST/NUISANCE COVARIATES CHANGE.
 
 We have noticed that sometimes R will not load the .Rd files using the "?" command after installing and then loading the package. We found that a simple fix for this is to install the package, restart your R-session and then load the package.
+
+## Citing MetabMiss
+To cite MetabMiss, type citation("MetabMiss") into the R console.
+
+## Reproducing simulations from paper
+The simulations can be reproduced using the files inst\\SimulateForPaper.Rmd, inst\\SimulateMetaboliteDataMatrix\_WithConounding\_withCorr.R, inst\\SimulateMetaboliteDataMatrix\_WithConounding.R and inst\\UsefulFunctions.R.

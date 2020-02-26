@@ -1,0 +1,15 @@
+citHeader("To cite MetabMiss in publications use:")
+
+citEntry(entry = "Article",
+  title        = "Estimation and inference in metabolomics with non-random missing data and latent factors",
+  author       = personList(as.person("Chris McKennan"),
+                   as.person("Carole Ober"), as.person("Dan Nicolae")),
+  journal      = "Annals of Applied Statistics (to appear)",
+  year         = "2020",
+
+  textVersion  =
+  paste("Chris McKennan, Carole Ober, and Dan Nicolae",
+        "Estimation and inference in metabolomics with non-random  missing  data  and  latent  factors.",
+        "Annals of Applied Statistics (to appear).",
+        "(2020)")
+)

@@ -1,0 +1,529 @@
+---
+title: "Simulate data"
+author: "Chris McKennan"
+date: "9/17/2019"
+output: html_document
+---
+
+This code reproduces the simulation experiments from Section 7 of the paper.
+
+#Load packages
+
+```{r Libraries}
+library(qvalue)
+library(ruv)
+library(dSVA)
+library(sva)  #Make sure to have these four libraries installed before install MetabMiss
+
+devtools::install_github("chrismckennan/MetabMiss")  #Install MetabMiss
+library(MetabMiss)
+```
+
+#Source functions
+Change these paths. These R scripts contain the functions necessary to simulate metabolomic data with non-ignorable missing entries and latent confounding factors.
+```{r Functions}
+source("UsefulFunctions.R")
+source("SimulateMetaboliteDataMatrix_WithConounding.R")
+source("SimulateMetaboliteDataMatrix_WithConounding_withCorr.R")
+```
+
+#Simulation parameters
+
+```{r SimulationParameters}
+p <- 1200  #Number of metabolites
+n <- 600   #Number of samples
+n.controls.ruv <- 20   #Number of control metabolites to use in RUV2 and RUV4. One MUST specify control genes for RUV2 and RUV4 to work.
+
+#L#
+Info <- c(0.61, 0.33, 0.19, 0.14, 0.12, 0.08, 0.07, 0.05, 0.05, 0.05) #1/p*L'Sigma^{-1}L
+sd.L <- 0.5
+K.hat <- 5   #Number of potential instruments
+
+#Omega#
+Omega <- c(0.5, rep(0, length(Info)-1))  #With this Omega, C explains 7.5% of the variance in X, on average
+
+#Sigma#
+mu.sigma2 <- 1   #Mean residual variance
+sd.sigma2 <- 0.2     #Standard deviation of the residual variances
+
+#Overall mean#
+mu <- 18     #Average global mean
+sd.mu <- 5      #Standard deviation of the global means
+
+#Missingness parameters#
+miss.mech <- "logit"     #Functional form of the missingness mechanism. We analyze all simulated data using a t distribution with 4 degrees of freedom.
+log.a.mean <- log(1); log.a.sd <- 0.4   #Mean and variance for log(scale) missingness mechanism parameters
+y0.mean <- 16; y0.sd <- 1.2   #Mean and variance for simulated location missingness mechanism parameters
+
+#Parameters for main effect#
+delta.B <- 0.20   #Fraction of non-zero entries
+sigma.B <- 0.4    #SD of effect size for non-zero entries
+```
+
+#Simulate and analyze data
+```{r SimulateData}
+n.sim <- 60    #Number of simulations. Estimating the missingniss mechanism takes a while, so this may take some time...   
+
+##FDP##
+FDP.logit <- list(); FDP.logit$naive <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$sva <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$dsva <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$ruv2 <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$ruv4 <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$iter <- matrix(NA, nrow=n.sim, ncol=5)
+
+FDP.logit.all <- list(); FDP.logit.all$naive <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$sva <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$dsva <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$ruv2 <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$ruv4 <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$iter <- matrix(NA, nrow=n.sim, ncol=5)
+
+##Power##
+Power.logit <- list(); Power.logit$naive <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$sva <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$dsva <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$ruv2 <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$ruv4 <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$iter <- matrix(NA, nrow=n.sim, ncol=5)
+
+Power.logit.all <- list(); Power.logit.all$naive <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$sva <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$dsva <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$ruv2 <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$ruv4 <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$iter <- matrix(NA, nrow=n.sim, ncol=5)
+
+##Inference on Beta##
+Beta.Sim <- matrix(NA, p, n.sim)
+Ind.Confident <- matrix(FALSE, p, n.sim)
+Diff.Beta.sIPW.iter <- matrix(NA, p, n.sim)
+Diff.Beta.sva <- matrix(NA, p, n.sim)
+Diff.Beta.ruv2 <- matrix(NA, p, n.sim)
+Diff.Beta.ruv4 <- matrix(NA, p, n.sim)
+Diff.Beta.dsva <- matrix(NA, p, n.sim)
+Diff.Beta.ignore <- matrix(NA, p, n.sim)
+Prob.Missing.sim <- matrix(NA, p, n.sim)
+Z.Scores.sIPW.iter <- matrix(NA, p, n.sim)
+Z.Scores.sva <- matrix(NA, p, n.sim)
+Z.Scores.ruv2 <- matrix(NA, p, n.sim)
+Z.Scores.ruv4 <- matrix(NA, p, n.sim)
+Z.Scores.dsva <- matrix(NA, p, n.sim)
+
+for (i in 1:n.sim) {
+  #Simulate data2#
+  out.Sim.logit.i <- SimMetab.Matrix.conf(n = n, p = p, X = c(rep(1,n/2), rep(0,n/2)), log.a.mean = log.a.mean, log.a.sd = log.a.sd, y0.mean = y0.mean, y0.sd = y0.sd, mu.mean = mu, mu.sd = sd.mu, Info.vec = Info, sd.L = sd.L, mean.rv = mu.sigma2, sd.rv = sd.sigma2, skew.resid = 0, miss.mech = miss.mech, skew.miss = runif(p, min = range.skew.miss[1], max = range.skew.miss[2]), Omega = Omega, delta.B = delta.B, sigma.B = sigma.B, mean.B = 0)
+  Prob.Missing.i <- 1 - out.Sim.logit.i$Frac.Obs
+  Prob.Missing.sim[,i] <- Prob.Missing.i
+  Beta.Sim[,i] <- out.Sim.logit.i$B
+  
+  #Get missingness mechanism#
+  out.miss.logit.i <- MetabMiss::EstimateMissing(Y = out.Sim.logit.i$Y, K = K.hat, max.missing.consider = 0.5, max.miss.C = 0.05, n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a = 0.1, max.a = 7, min.y0 = 10, max.y0 = 30, t.df = 4, p.min.1 = 0, p.min.2 = 0, BH.analyze.min = 0.25, min.quant.5 = 0, shrink.Est = T, prop.y0.sd = 0.2, prop.a.sd = 0.2, n.boot.J = 150, n.iter.MCMC = 6e3, n.burn.MCMC = 2e3, Model.Pvalue = F, Bayes.est = "EmpBayes", simple.average.EB = T)
+  Ind.Confident[out.miss.logit.i$Ind.Confident,i] <- TRUE
+  
+  #Inference on beta#
+  out.CC.logit.i <- MetabMiss::CC.Missing(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = out.Sim.logit.i$Z, K = length(Info), Miss.Mech = out.miss.logit.i, max.miss.perp = 0.5, max.miss.image = 0.5, BH.min = 0.25, refine.C = F, p.refine.both = F)
+  
+  out.CC.logit.i.sva <- Multivariate.OLS(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = cbind( out.Sim.logit.i$Z, sva::sva(dat = out.Sim.logit.i$Y[Prob.Missing.i==0,], mod = cbind(out.Sim.logit.i$X,out.Sim.logit.i$Z), mod0 = cbind(out.Sim.logit.i$Z), n.sv = length(Info))$sv ), missing.max = 0.5)
+  
+  out.CC.logit.i.dsva <- Multivariate.OLS(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = cbind( out.Sim.logit.i$Z, dSVA::dSVA(Y = t(out.Sim.logit.i$Y[Prob.Missing.i==0,]), X = cbind(out.Sim.logit.i$X), ncomp = length(Info))$Z ), missing.max = 0.5)
+  
+  control.genes <- (1:sum(Prob.Missing.i==0)) %in% which(abs(out.Sim.logit.i$B[Prob.Missing.i==0]) < 1e-8)[sample(x=1:sum(abs(out.Sim.logit.i$B[Prob.Missing.i==0]) < 1e-8), size=n.controls.ruv, replace = F)]
+  out.CC.logit.i.ruv2 <- Multivariate.OLS(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = cbind( out.Sim.logit.i$Z, ruv::RUV2(Y = t(out.Sim.logit.i$Y[Prob.Missing.i==0,]), X = cbind(out.Sim.logit.i$X), ctl=control.genes, k = length(Info), inputcheck = F)$W ), missing.max = 0.5)
+  out.CC.logit.i.ruv4 <- Multivariate.OLS(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = cbind( out.Sim.logit.i$Z, ruv::RUV4(Y = t(out.Sim.logit.i$Y[Prob.Missing.i==0,]), X = cbind(out.Sim.logit.i$X), ctl=control.genes, k = length(Info), inputcheck = F)$W ), missing.max = 0.5)
+  
+  Diff.Beta.sIPW.iter[,i] <- out.CC.logit.i$Beta.iter - out.Sim.logit.i$B
+  Diff.Beta.sva[,i] <- out.CC.logit.i.sva$B - out.Sim.logit.i$B
+  Diff.Beta.ruv2[,i] <- out.CC.logit.i.ruv2$B - out.Sim.logit.i$B
+  Diff.Beta.ruv4[,i] <- out.CC.logit.i.ruv4$B - out.Sim.logit.i$B
+  Diff.Beta.dsva[,i] <- out.CC.logit.i.dsva$B - out.Sim.logit.i$B
+
+  Z.Scores.sIPW.iter[,i] <- Diff.Beta.sIPW.iter[,i]/sqrt(unlist(out.CC.logit.i$Var.beta.iter))
+  Z.Scores.sva[,i] <- Diff.Beta.sva[,i]/sqrt(out.CC.logit.i.sva$Var.Beta)
+  Z.Scores.ruv2[,i] <- Diff.Beta.ruv2[,i]/sqrt(out.CC.logit.i.ruv2$Var.Beta)
+  Z.Scores.ruv4[,i] <- Diff.Beta.ruv4[,i]/sqrt(out.CC.logit.i.ruv4$Var.Beta)
+  Z.Scores.dsva[,i] <- Diff.Beta.dsva[,i]/sqrt(out.CC.logit.i.dsva$Var.Beta)
+
+  #Calculate FDP for confident entries#
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i$p.t.naive[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$naive[i,] <- FDP.i$FDP
+  Power.logit$naive[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.sva$p.Beta[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$sva[i,] <- FDP.i$FDP
+  Power.logit$sva[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.ruv2$p.Beta[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$ruv2[i,] <- FDP.i$FDP
+  Power.logit$ruv2[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.ruv4$p.Beta[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$ruv4[i,] <- FDP.i$FDP
+  Power.logit$ruv4[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.dsva$p.Beta[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$dsva[i,] <- FDP.i$FDP
+  Power.logit$dsva[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i$p.t.iter[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$iter[i,] <- FDP.i$FDP
+  Power.logit$iter[i,] <- FDP.i$Power
+  
+  #Calculate FDP for all entries#
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i$p.t.naive, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$naive[i,] <- FDP.i$FDP
+  Power.logit.all$naive[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.sva$p.Beta, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$sva[i,] <- FDP.i$FDP
+  Power.logit.all$sva[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.ruv2$p.Beta, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$ruv2[i,] <- FDP.i$FDP
+  Power.logit.all$ruv2[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.ruv4$p.Beta, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$ruv4[i,] <- FDP.i$FDP
+  Power.logit.all$ruv4[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.dsva$p.Beta, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$dsva[i,] <- FDP.i$FDP
+  Power.logit.all$dsva[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i$p.t.iter, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$iter[i,] <- FDP.i$FDP
+  Power.logit.all$iter[i,] <- FDP.i$Power
+  
+  print(i)
+}
+```
+
+#Analyze simulated data
+```{r AnalyzeSimulatedData}
+ii <- sum(!is.na(FDP.logit.all$iter[,1]))   #This ensures the code below runs when you stop the simulations early.
+
+#####95% Confidence intervals#####
+alpha.CI <- 0.05
+min.miss <- 0.05
+max.miss <- 0.5
+B.breaks <- c(-1, 0, 0.2, 0.4, 0.6, 0.8, Inf)
+pch.CI <- c(16, 15, 17, 3, 4, 8, 18)
+col.CI <- c("black", "blue", "red", "orange", "violet", "grey", "cyan"); name.ids <- c("iter", "known", "dsva", "ruv2", "ruv4", "ignore")
+conf.y.range <- c(0.45, 1)
+
+CI.coverage <- matrix(NA, nrow=7, ncol=length(B.breaks)-1)  #rows: MetabMiss, dsva, sva, ruv2, ruv4
+CI.n <- rep(NA, length(B.breaks)-1)
+for (j in 1:(length(B.breaks)-1)) {
+  tmp.1 <- Compute.CI(Z = Z.Scores.sIPW.iter, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[1,j] <- tmp.1$cov
+    CI.n[j] <- tmp.1$n
+  
+  tmp.3 <- Compute.CI(Z = Z.Scores.dsva, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[2,j] <- tmp.3$cov
+ 
+  tmp.4 <- Compute.CI(Z = Z.Scores.sva, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[3,j] <- tmp.4$cov
+
+  tmp.5 <- Compute.CI(Z = Z.Scores.ruv2, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[4,j] <- tmp.5$cov
+  
+  tmp.6 <- Compute.CI(Z = Z.Scores.ruv4, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[5,j] <- tmp.6$cov
+}
+plot(1:length(CI.coverage[1,]), CI.coverage[1,], axes=F, ylim=conf.y.range, pch=pch.CI[1], col=col.CI[1], xlab="", ylab="95% CI coverage")
+for (j in 3:nrow(CI.coverage)) {
+  points(x = 1:length(CI.coverage[1,]), y=CI.coverage[j,], pch=pch.CI[j], col=col.CI[j])
+}
+abline(h=1-alpha.CI, lty=2, lwd=2)
+axis(side = 1, at = 1:length(CI.coverage[1,]), labels = c( expression("|"~beta["*g"]~"|"==0), expression(0<"|"~italic(beta["*g"]) ~ "|" <=0.2), expression(0.2<"|"~italic(beta["*g"]) ~ "|" <=0.4), expression(0.4<"|"~italic(beta["*g"]) ~ "|" <=0.6), expression(0.6<"|"~italic(beta["*g"]) ~ "|" <=0.8), expression(0.8<italic("|"~beta["*g"]~"|")) ), las=2, cex.axis=0.65)
+axis(side = 2, at = seq(0.4,1,by=0.05), labels = seq(0.4,1,by=0.05))
+legend("bottomleft", legend = c("MetabMiss", "dSVA", "IRW-SVA", "RUV-2", "RUV-4"), col = c(col.CI[1], col.CI[3:length(col.CI)]), pch = c(pch.CI[1], pch.CI[3:length(pch.CI)]), cex = 0.59)
+
+#####FDP and Power#####
+x.labels <- c("MetabMiss", "dSVA", "IRW-SVA", "RUV-2", "RUV-4", "Ignore C")
+par(mfrow=c(1,4), mai = c(1, 0.5, 0.5, 0.1))
+
+#FDP#
+boxplot(FDP.logit$iter[1:ii,1], FDP.logit$dsva[1:ii,1], FDP.logit$sva[1:ii,1], FDP.logit$ruv2[1:ii,1], FDP.logit$ruv4[1:ii,1], FDP.logit$naive[1:ii,1], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(FDP.logit$naive[1:ii,1],na.rm = T), digits = 1),by=0.05))
+title(ylab = "FDP", line = 2.5, cex=2)
+abline(h=seq(0.05,0.25,by=0.05)[1], col="red", lty=2, lwd=2)
+
+boxplot(FDP.logit$iter[1:ii,2], FDP.logit$dsva[1:ii,2], FDP.logit$sva[1:ii,2], FDP.logit$ruv2[1:ii,2], FDP.logit$ruv4[1:ii,2], FDP.logit$naive[1:ii,2], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(FDP.logit$naive[1:ii,2],na.rm = T), digits = 1),by=0.05))
+abline(h=seq(0.05,0.25,by=0.05)[2], col="red", lty=2, lwd=2)
+
+boxplot(FDP.logit$iter[1:ii,3], FDP.logit$dsva[1:ii,3], FDP.logit$sva[1:ii,3], FDP.logit$ruv2[1:ii,3], FDP.logit$ruv4[1:ii,3], FDP.logit$naive[1:ii,3], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(FDP.logit$naive[1:ii,3],na.rm = T), digits = 1),by=0.05))
+abline(h=seq(0.05,0.25,by=0.05)[3], col="red", lty=2, lwd=2)
+
+boxplot(FDP.logit$iter[1:ii,4], FDP.logit$dsva[1:ii,4], FDP.logit$sva[1:ii,4], FDP.logit$ruv2[1:ii,4], FDP.logit$ruv4[1:ii,4], FDP.logit$naive[1:ii,4], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(FDP.logit$naive[1:ii,4],na.rm = T), digits = 1),by=0.05))
+abline(h=seq(0.05,0.25,by=0.05)[4], col="red", lty=2, lwd=2)
+
+#Power#
+par(mfrow=c(1,4), mai = c(1, 0.5, 0.5, 0.1))
+
+boxplot(Power.logit$iter[1:ii,1], Power.logit$dsva[1:ii,1], Power.logit$sva[1:ii,1], Power.logit$ruv2[1:ii,1], Power.logit$ruv4[1:ii,1], Power.logit$naive[1:ii,1], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(Power.logit$naive[1:ii,1],na.rm = T), digits = 1),by=0.05))
+title(ylab = "TRP", line = 2.5, cex=2)
+
+boxplot(Power.logit$iter[1:ii,2], Power.logit$dsva[1:ii,2], Power.logit$sva[1:ii,2], Power.logit$ruv2[1:ii,2], Power.logit$ruv4[1:ii,2], Power.logit$naive[1:ii,2], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(Power.logit$naive[1:ii,2],na.rm = T), digits = 1),by=0.05))
+
+boxplot(Power.logit$iter[1:ii,3], Power.logit$dsva[1:ii,3], Power.logit$sva[1:ii,3], Power.logit$ruv2[1:ii,3], Power.logit$ruv4[1:ii,3], Power.logit$naive[1:ii,3], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(Power.logit$naive[1:ii,3],na.rm = T), digits = 1),by=0.05))
+
+boxplot(Power.logit$iter[1:ii,4], Power.logit$dsva[1:ii,4], Power.logit$sva[1:ii,4], Power.logit$ruv2[1:ii,4], Power.logit$ruv4[1:ii,4], Power.logit$naive[1:ii,4], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(Power.logit$naive[1:ii,4],na.rm = T), digits = 1),by=0.05)) 
+```
+
+#Simulation parameters, correlated data
+Simulation parameters for metabolomic data that are correlated in small, localized networks.
+```{r SimulationParameters_corr}
+p <- 1200  #Number of metabolites
+n <- 600   #Number of samples
+n.controls.ruv <- 20   #Number of control metabolites to use in RUV2 and RUV4. One MUST specify control genes for RUV2 and RUV4 to work.
+
+#L#
+Info <- c(0.61, 0.33, 0.19, 0.14, 0.12, 0.08, 0.07, 0.05, 0.05, 0.05) #1/p*L'Sigma^{-1}L
+sd.L <- 0.5
+K.hat <- 5   #Number of potential instruments
+
+#Omega#
+Omega <- c(0.5, rep(0, length(Info)-1))  #With this Omega, C explains 7.5% of the variance in X, on average
+
+#Sigma#
+mu.sigma2 <- 1   #Mean residual variance
+sd.sigma2 <- 0.2     #Standard deviation of the residual variances
+
+#Overall mean#
+mu <- 18     #Average global mean
+sd.mu <- 5      #Standard deviation of the global means
+
+#Missingness parameters#
+miss.mech <- "logit"     #Functional form of the missingness mechanism. We analyze all simulated data using a t distribution with 4 degrees of freedom.
+log.a.mean <- log(1); log.a.sd <- 0.4   #Mean and variance for log(scale) missingness mechanism parameters
+y0.mean <- 16; y0.sd <- 1.2   #Mean and variance for simulated location missingness mechanism parameters
+
+#Parameters for main effect#
+delta.B <- 0.20   #Fraction of non-zero entries
+sigma.B <- 0.4    #SD of effect size for non-zero entries
+
+#Residual correlation parameters#
+Include.networks <- T
+size.block <- 3   #Number of metabolites in a network
+s.rho <- 0.8   #Increase for more correlation, decrease for less correlation
+n.blocks <- p/size.block   #Number of correlation networks. All of the metabolites lie in a correlation network of size 3
+```
+
+#Simulate and analyze data, correlated data
+```{r SimulateData_corr}
+n.sim <- 60    #Number of simulations. Estimating the missingniss mechanism takes a while, so this may take some time...   
+
+##FDP##
+FDP.logit <- list(); FDP.logit$naive <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$sva <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$dsva <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$ruv2 <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$ruv4 <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit$iter <- matrix(NA, nrow=n.sim, ncol=5)
+
+FDP.logit.all <- list(); FDP.logit.all$naive <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$sva <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$dsva <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$ruv2 <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$ruv4 <- matrix(NA, nrow=n.sim, ncol=5); FDP.logit.all$iter <- matrix(NA, nrow=n.sim, ncol=5)
+
+##Power##
+Power.logit <- list(); Power.logit$naive <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$sva <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$dsva <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$ruv2 <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$ruv4 <- matrix(NA, nrow=n.sim, ncol=5); Power.logit$iter <- matrix(NA, nrow=n.sim, ncol=5)
+
+Power.logit.all <- list(); Power.logit.all$naive <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$sva <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$dsva <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$ruv2 <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$ruv4 <- matrix(NA, nrow=n.sim, ncol=5); Power.logit.all$iter <- matrix(NA, nrow=n.sim, ncol=5)
+
+##Inference on Beta##
+Beta.Sim <- matrix(NA, p, n.sim)
+Ind.Confident <- matrix(FALSE, p, n.sim)
+Diff.Beta.sIPW.iter <- matrix(NA, p, n.sim)
+Diff.Beta.sva <- matrix(NA, p, n.sim)
+Diff.Beta.ruv2 <- matrix(NA, p, n.sim)
+Diff.Beta.ruv4 <- matrix(NA, p, n.sim)
+Diff.Beta.dsva <- matrix(NA, p, n.sim)
+Diff.Beta.ignore <- matrix(NA, p, n.sim)
+Prob.Missing.sim <- matrix(NA, p, n.sim)
+Z.Scores.sIPW.iter <- matrix(NA, p, n.sim)
+Z.Scores.sva <- matrix(NA, p, n.sim)
+Z.Scores.ruv2 <- matrix(NA, p, n.sim)
+Z.Scores.ruv4 <- matrix(NA, p, n.sim)
+Z.Scores.dsva <- matrix(NA, p, n.sim)
+
+for (i in 1:n.sim) {
+  #Simulate data2#
+  out.Sim.logit.i <- SimMetab.Matrix.conf.corr(n = n, p = p, X = c(rep(1,n/2), rep(0,n/2)), log.a.mean = log.a.mean, log.a.sd = log.a.sd, y0.mean = y0.mean, y0.sd = y0.sd, mu.mean = mu, mu.sd = sd.mu, Info.vec = Info, sd.L = sd.L, mean.rv = mu.sigma2, sd.rv = sd.sigma2, skew.resid = 0, miss.mech = miss.mech, skew.miss = runif(p, min = range.skew.miss[1], max = range.skew.miss[2]), Omega = Omega, delta.B = delta.B, sigma.B = sigma.B, mean.B = 0, cor.params = list(rho=0,size.block=size.block,arbitrary.corr=T,n.blocks=n.blocks,s.rho=s.rho))
+  Prob.Missing.i <- 1 - out.Sim.logit.i$Frac.Obs
+  Prob.Missing.sim[,i] <- Prob.Missing.i
+  Beta.Sim[,i] <- out.Sim.logit.i$B
+  
+  #Get missingness mechanism#
+  out.miss.logit.i <- MetabMiss::EstimateMissing(Y = out.Sim.logit.i$Y, K = K.hat, max.missing.consider = 0.5, max.miss.C = 0.05, n.repeat.Sigma.C = 1, n.K.GMM = 2, min.a = 0.1, max.a = 7, min.y0 = 10, max.y0 = 30, t.df = 4, p.min.1 = 0, p.min.2 = 0, BH.analyze.min = 0.25, min.quant.5 = 0, shrink.Est = T, prop.y0.sd = 0.2, prop.a.sd = 0.2, n.boot.J = 150, n.iter.MCMC = 6e3, n.burn.MCMC = 2e3, Model.Pvalue = F, Bayes.est = "EmpBayes", simple.average.EB = T)
+  Ind.Confident[out.miss.logit.i$Ind.Confident,i] <- TRUE
+  
+  #Inference on beta#
+  out.CC.logit.i <- MetabMiss::CC.Missing(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = out.Sim.logit.i$Z, K = length(Info), Miss.Mech = out.miss.logit.i, max.miss.perp = 0.5, max.miss.image = 0.5, BH.min = 0.25, refine.C = F, p.refine.both = F)
+  
+  out.CC.logit.i.sva <- Multivariate.OLS(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = cbind( out.Sim.logit.i$Z, sva::sva(dat = out.Sim.logit.i$Y[Prob.Missing.i==0,], mod = cbind(out.Sim.logit.i$X,out.Sim.logit.i$Z), mod0 = cbind(out.Sim.logit.i$Z), n.sv = length(Info))$sv ), missing.max = 0.5)
+  
+  out.CC.logit.i.dsva <- Multivariate.OLS(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = cbind( out.Sim.logit.i$Z, dSVA::dSVA(Y = t(out.Sim.logit.i$Y[Prob.Missing.i==0,]), X = cbind(out.Sim.logit.i$X), ncomp = length(Info))$Z ), missing.max = 0.5)
+  
+  control.genes <- (1:sum(Prob.Missing.i==0)) %in% which(abs(out.Sim.logit.i$B[Prob.Missing.i==0]) < 1e-8)[sample(x=1:sum(abs(out.Sim.logit.i$B[Prob.Missing.i==0]) < 1e-8), size=n.controls.ruv, replace = F)]
+  out.CC.logit.i.ruv2 <- Multivariate.OLS(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = cbind( out.Sim.logit.i$Z, ruv::RUV2(Y = t(out.Sim.logit.i$Y[Prob.Missing.i==0,]), X = cbind(out.Sim.logit.i$X), ctl=control.genes, k = length(Info), inputcheck = F)$W ), missing.max = 0.5)
+  out.CC.logit.i.ruv4 <- Multivariate.OLS(Y = out.Sim.logit.i$Y, X = out.Sim.logit.i$X, Z = cbind( out.Sim.logit.i$Z, ruv::RUV4(Y = t(out.Sim.logit.i$Y[Prob.Missing.i==0,]), X = cbind(out.Sim.logit.i$X), ctl=control.genes, k = length(Info), inputcheck = F)$W ), missing.max = 0.5)
+  
+  Diff.Beta.sIPW.iter[,i] <- out.CC.logit.i$Beta.iter - out.Sim.logit.i$B
+  Diff.Beta.sva[,i] <- out.CC.logit.i.sva$B - out.Sim.logit.i$B
+  Diff.Beta.ruv2[,i] <- out.CC.logit.i.ruv2$B - out.Sim.logit.i$B
+  Diff.Beta.ruv4[,i] <- out.CC.logit.i.ruv4$B - out.Sim.logit.i$B
+  Diff.Beta.dsva[,i] <- out.CC.logit.i.dsva$B - out.Sim.logit.i$B
+
+  Z.Scores.sIPW.iter[,i] <- Diff.Beta.sIPW.iter[,i]/sqrt(unlist(out.CC.logit.i$Var.beta.iter))
+  Z.Scores.sva[,i] <- Diff.Beta.sva[,i]/sqrt(out.CC.logit.i.sva$Var.Beta)
+  Z.Scores.ruv2[,i] <- Diff.Beta.ruv2[,i]/sqrt(out.CC.logit.i.ruv2$Var.Beta)
+  Z.Scores.ruv4[,i] <- Diff.Beta.ruv4[,i]/sqrt(out.CC.logit.i.ruv4$Var.Beta)
+  Z.Scores.dsva[,i] <- Diff.Beta.dsva[,i]/sqrt(out.CC.logit.i.dsva$Var.Beta)
+
+  #Calculate FDP for confident entries#
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i$p.t.naive[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$naive[i,] <- FDP.i$FDP
+  Power.logit$naive[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.sva$p.Beta[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$sva[i,] <- FDP.i$FDP
+  Power.logit$sva[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.ruv2$p.Beta[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$ruv2[i,] <- FDP.i$FDP
+  Power.logit$ruv2[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.ruv4$p.Beta[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$ruv4[i,] <- FDP.i$FDP
+  Power.logit$ruv4[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.dsva$p.Beta[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$dsva[i,] <- FDP.i$FDP
+  Power.logit$dsva[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i$p.t.iter[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05], Beta = out.Sim.logit.i$B[out.miss.logit.i$Ind.Confident | Prob.Missing.i <= 0.05])
+  FDP.logit$iter[i,] <- FDP.i$FDP
+  Power.logit$iter[i,] <- FDP.i$Power
+  
+  #Calculate FDP for all entries#
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i$p.t.naive, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$naive[i,] <- FDP.i$FDP
+  Power.logit.all$naive[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.sva$p.Beta, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$sva[i,] <- FDP.i$FDP
+  Power.logit.all$sva[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.ruv2$p.Beta, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$ruv2[i,] <- FDP.i$FDP
+  Power.logit.all$ruv2[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.ruv4$p.Beta, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$ruv4[i,] <- FDP.i$FDP
+  Power.logit.all$ruv4[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i.dsva$p.Beta, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$dsva[i,] <- FDP.i$FDP
+  Power.logit.all$dsva[i,] <- FDP.i$Power
+  
+  FDP.i <- Calc.FDP(p.values = out.CC.logit.i$p.t.iter, Beta = out.Sim.logit.i$B)
+  FDP.logit.all$iter[i,] <- FDP.i$FDP
+  Power.logit.all$iter[i,] <- FDP.i$Power
+  
+  print(i)
+}
+```
+
+
+#Analyze simulated correlated data
+Analyze simulated metabolomic data that are correlated in small, localized networks.
+```{r AnalyzeSimulatedData_corr}
+ii <- sum(!is.na(FDP.logit.all$iter[,1]))   #This ensures the code below runs when you stop the simulations early.
+
+#####95% Confidence intervals#####
+alpha.CI <- 0.05
+min.miss <- 0.05
+max.miss <- 0.5
+B.breaks <- c(-1, 0, 0.2, 0.4, 0.6, 0.8, Inf)
+pch.CI <- c(16, 17, 3, 4, 8, 15)
+col.CI <- c("black", "red", "orange", "violet", "grey", "blue"); name.ids <- c("iter", "dsva", "ruv2", "ruv4", "known")
+conf.y.range <- c(0.45, 1)
+
+CI.coverage <- matrix(NA, nrow=7, ncol=length(B.breaks)-1)  #rows: MetabMiss, dsva, sva, ruv2, ruv4
+CI.n <- rep(NA, length(B.breaks)-1)
+for (j in 1:(length(B.breaks)-1)) {
+  tmp.1 <- Compute.CI(Z = Z.Scores.sIPW.iter, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[1,j] <- tmp.1$cov
+    CI.n[j] <- tmp.1$n
+  
+  tmp.3 <- Compute.CI(Z = Z.Scores.dsva, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[2,j] <- tmp.3$cov
+ 
+  tmp.4 <- Compute.CI(Z = Z.Scores.sva, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[3,j] <- tmp.4$cov
+
+  tmp.5 <- Compute.CI(Z = Z.Scores.ruv2, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[4,j] <- tmp.5$cov
+  
+  tmp.6 <- Compute.CI(Z = Z.Scores.ruv4, B = Beta.Sim, P.miss = Prob.Missing.sim, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+  CI.coverage[5,j] <- tmp.6$cov
+  
+  if (exists("Z.Scores.Cknown")) {
+    tmp.7 <- Compute.CI(Z = Z.Scores.Cknown, B = Beta.Sim.Cknown, P.miss = Prob.Missing.sim.Cknown, max.i = ii, min.B = B.breaks[j], max.B = B.breaks[j+1], alpha = alpha.CI, min.miss = min.miss)
+    CI.coverage[6,j] <- tmp.7$cov
+  }
+}
+jpeg(filename = "../output/SimulationResults/Logit/EstimatingMainEffect/WithIterativeOmega/95ConfidenceInterval_WithCobserved_Correlated.jpeg", width = 550/500*1600, height = 1600, res=300)
+plot(1:length(CI.coverage[1,]), CI.coverage[1,], axes=F, ylim=conf.y.range, pch=pch.CI[1], col=col.CI[1], xlab="", ylab="95% CI coverage", type="n")
+for (j in 2:nrow(CI.coverage)) {
+  points(x = 1:length(CI.coverage[1,]), y=CI.coverage[j,], pch=pch.CI[j], col=col.CI[j])
+}
+points(x = 1:length(CI.coverage[1,]), y=CI.coverage[1,], pch=pch.CI[1], col=col.CI[1])
+abline(h=1-alpha.CI, lty=2, lwd=2)
+axis(side = 1, at = 1:length(CI.coverage[1,]), labels = c( expression("|"~beta["g"]~"|"==0), expression(0<"|"~italic(beta["g"]) ~ "|" <=0.2), expression(0.2<"|"~italic(beta["g"]) ~ "|" <=0.4), expression(0.4<"|"~italic(beta["g"]) ~ "|" <=0.6), expression(0.6<"|"~italic(beta["g"]) ~ "|" <=0.8), expression(0.8<italic("|"~beta["g"]~"|")) ), las=2, cex.axis=0.65)
+axis(side = 2, at = seq(0.4,1,by=0.05), labels = seq(0.4,1,by=0.05))
+if (exists("Z.Scores.Cknown")) {
+  legend("bottomleft", legend = c("MetabMiss", "C known", "dSVA", "IRW-SVA", "RUV-2", "RUV-4"), col = col.CI[c(1,6,2:5)], pch = c(pch.CI[c(1,6,2:5)]), cex = 0.59)
+} else {
+  legend("bottomleft", legend = c("MetabMiss", "dSVA", "IRW-SVA", "RUV-2", "RUV-4"), col = col.CI[1:sum(!is.na(CI.coverage[,1]))], pch = c(pch.CI[1:sum(!is.na(CI.coverage[,1]))]), cex = 0.59)
+}
+dev.off()
+
+
+#####FDP and Power#####
+x.labels <- c("MetabMiss", "dSVA", "IRW-SVA", "RUV-2", "RUV-4", "Ignore C")
+par(mfrow=c(1,4), mai = c(1, 0.5, 0.5, 0.1))
+
+#FDP#
+boxplot(FDP.logit$iter[1:ii,1], FDP.logit$dsva[1:ii,1], FDP.logit$sva[1:ii,1], FDP.logit$ruv2[1:ii,1], FDP.logit$ruv4[1:ii,1], FDP.logit$naive[1:ii,1], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(FDP.logit$naive[1:ii,1],na.rm = T), digits = 1),by=0.05))
+title(ylab = "FDP", line = 2.5, cex=2)
+abline(h=seq(0.05,0.25,by=0.05)[1], col="red", lty=2, lwd=2)
+
+boxplot(FDP.logit$iter[1:ii,2], FDP.logit$dsva[1:ii,2], FDP.logit$sva[1:ii,2], FDP.logit$ruv2[1:ii,2], FDP.logit$ruv4[1:ii,2], FDP.logit$naive[1:ii,2], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(FDP.logit$naive[1:ii,2],na.rm = T), digits = 1),by=0.05))
+abline(h=seq(0.05,0.25,by=0.05)[2], col="red", lty=2, lwd=2)
+
+boxplot(FDP.logit$iter[1:ii,3], FDP.logit$dsva[1:ii,3], FDP.logit$sva[1:ii,3], FDP.logit$ruv2[1:ii,3], FDP.logit$ruv4[1:ii,3], FDP.logit$naive[1:ii,3], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(FDP.logit$naive[1:ii,3],na.rm = T), digits = 1),by=0.05))
+abline(h=seq(0.05,0.25,by=0.05)[3], col="red", lty=2, lwd=2)
+
+boxplot(FDP.logit$iter[1:ii,4], FDP.logit$dsva[1:ii,4], FDP.logit$sva[1:ii,4], FDP.logit$ruv2[1:ii,4], FDP.logit$ruv4[1:ii,4], FDP.logit$naive[1:ii,4], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(FDP.logit$naive[1:ii,4],na.rm = T), digits = 1),by=0.05))
+abline(h=seq(0.05,0.25,by=0.05)[4], col="red", lty=2, lwd=2)
+
+#Power#
+par(mfrow=c(1,4), mai = c(1, 0.5, 0.5, 0.1))
+
+boxplot(Power.logit$iter[1:ii,1], Power.logit$dsva[1:ii,1], Power.logit$sva[1:ii,1], Power.logit$ruv2[1:ii,1], Power.logit$ruv4[1:ii,1], Power.logit$naive[1:ii,1], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(Power.logit$naive[1:ii,1],na.rm = T), digits = 1),by=0.05))
+title(ylab = "TRP", line = 2.5, cex=2)
+
+boxplot(Power.logit$iter[1:ii,2], Power.logit$dsva[1:ii,2], Power.logit$sva[1:ii,2], Power.logit$ruv2[1:ii,2], Power.logit$ruv4[1:ii,2], Power.logit$naive[1:ii,2], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(Power.logit$naive[1:ii,2],na.rm = T), digits = 1),by=0.05))
+
+boxplot(Power.logit$iter[1:ii,3], Power.logit$dsva[1:ii,3], Power.logit$sva[1:ii,3], Power.logit$ruv2[1:ii,3], Power.logit$ruv4[1:ii,3], Power.logit$naive[1:ii,3], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(Power.logit$naive[1:ii,3],na.rm = T), digits = 1),by=0.05))
+
+boxplot(Power.logit$iter[1:ii,4], Power.logit$dsva[1:ii,4], Power.logit$sva[1:ii,4], Power.logit$ruv2[1:ii,4], Power.logit$ruv4[1:ii,4], Power.logit$naive[1:ii,4], axes=F, at=1:length(x.labels))
+axis(side = 1, at = 1:length(x.labels), labels = x.labels, las = 2)
+axis(side = 2, at = seq(0,round(max(Power.logit$naive[1:ii,4],na.rm = T), digits = 1),by=0.05)) 
+
+#save(FDP.logit, FDP.logit.all, Power.logit, Power.logit.all, Prob.Missing.sim, Beta.Sim, Ind.Confident, Diff.Beta.sIPW.iter, Diff.Beta.sva, Diff.Beta.dsva, Diff.Beta.ignore, Diff.Beta.ruv2, Diff.Beta.ruv4, Z.Scores.sIPW.iter, Z.Scores.sva, Z.Scores.dsva, Z.Scores.ruv2, Z.Scores.ruv4, file = "../output/SimulationResults/Logit/EstimatingMainEffect/WithIterativeOmega/Simulation_n600_logit_Khat5_Correlated.Rdata")
+```
